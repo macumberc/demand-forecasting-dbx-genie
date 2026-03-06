@@ -13,7 +13,9 @@ from demand_forecasting_genie import deploy
 result = deploy(spark)
 ```
 
-That's it. The `deploy()` function creates the catalog, schema, three tables (~6,700 rows), and prints a summary. Pass a `warehouse_id` to also create a Genie space:
+That's it. The `deploy()` function creates the catalog, schema, three tables (~6,700 rows), auto-detects the best SQL warehouse, creates a Genie space, and renders clickable buttons for the Genie room and cleanup.
+
+To use a specific warehouse instead of auto-detection:
 
 ```python
 result = deploy(spark, warehouse_id="your_warehouse_id")
@@ -41,7 +43,7 @@ This drops the schema (CASCADE) and deletes the Genie space.
 | `spark` | SparkSession | *required* | Active Spark session (`spark` in notebooks) |
 | `catalog` | str | current user | Target catalog name (e.g. `jane_doe`) |
 | `schema` | str | `demand_forecasting` | Target schema name |
-| `warehouse_id` | str | `None` | SQL warehouse ID for Genie space; skips if omitted |
+| `warehouse_id` | str | auto-detected | SQL warehouse ID for Genie space; auto-selects the best available if omitted |
 
 **Returns** a dict with keys: `catalog`, `schema`, `fqn`, `tables`, `genie_url`.
 

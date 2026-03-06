@@ -89,6 +89,51 @@ def _display_html(html: str) -> None:
         pass
 
 
+_SUMMARY_HTML = """\
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 680px; margin: 16px 0;">
+  <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px;
+              padding: 24px; margin-bottom: 16px;">
+    <h2 style="margin: 0 0 16px 0; color: #1b3a4b; font-size: 20px;">
+      NorthStar Logistics — Setup Complete
+    </h2>
+    <table style="width: 100%%; border-collapse: collapse; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #dee2e6;">
+        <td style="padding: 6px 0; color: #6c757d;">Schema</td>
+        <td style="padding: 6px 0; font-weight: 600; font-family: monospace;">%(fqn)s</td>
+      </tr>
+      %(table_rows)s
+      <tr style="border-top: 2px solid #adb5bd;">
+        <td style="padding: 6px 0; color: #6c757d; font-weight: 600;">Total</td>
+        <td style="padding: 6px 0; font-weight: 600;">%(total)s rows</td>
+      </tr>
+    </table>
+  </div>
+  %(genie_button)s
+  <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px;
+              padding: 16px; margin-top: 12px;">
+    <div style="font-size: 13px; color: #664d03; margin-bottom: 8px; font-weight: 600;">
+      Cleanup — run this to remove everything:
+    </div>
+    <pre style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px;
+                font-size: 13px; margin: 0; overflow-x: auto;"><code>from demand_forecasting_genie import teardown
+teardown(spark, **result)</code></pre>
+  </div>
+</div>
+"""
+
+_GENIE_BUTTON_HTML = """\
+<div style="margin-bottom: 4px;">
+  <a href="%(genie_url)s" target="_blank"
+     style="display: inline-block; background: #1b3a4b; color: white; padding: 12px 28px;
+            border-radius: 6px; text-decoration: none; font-size: 15px; font-weight: 600;
+            letter-spacing: 0.3px;">
+    Open Genie Space
+  </a>
+</div>
+"""
+
+
 def _workspace_context(spark: Any) -> tuple[str, str, str]:
     """Return (workspace_url, api_token, username)."""
     workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
@@ -113,6 +158,33 @@ def _default_catalog(spark: Any) -> str:
     """Derive a catalog name from the current user's email prefix."""
     user = spark.sql("SELECT current_user()").first()[0]
     return re.sub(r"[^a-zA-Z0-9]", "_", user.split("@")[0]).lower()
+
+
+def _find_best_warehouse(workspace_url: str, token: str) -> Optional[str]:
+    """Auto-detect the best SQL warehouse available to the current user.
+
+    Preference order: serverless RUNNING > pro RUNNING > serverless STOPPED >
+    pro STOPPED > classic RUNNING > classic STOPPED.
+    """
+    status, result = _api("GET", f"https://{workspace_url}/api/2.0/sql/warehouses", token)
+    if status != 200 or not isinstance(result, dict):
+        return None
+
+    warehouses = result.get("warehouses", [])
+    if not warehouses:
+        return None
+
+    def _rank(wh: dict) -> tuple:
+        is_serverless = wh.get("enable_serverless_compute", False)
+        wh_type = wh.get("warehouse_type", "")
+        is_pro = wh_type == "PRO"
+        is_running = wh.get("state", "") == "RUNNING"
+        return (is_serverless, is_pro, is_running)
+
+    warehouses.sort(key=_rank, reverse=True)
+    best = warehouses[0]
+    _log(f"Auto-selected warehouse: {best.get('name', best['id'])} ({best['id']})")
+    return best["id"]
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +776,7 @@ def deploy(
     """Deploy the NorthStar Logistics demand-forecasting Genie data room.
 
     Creates a Unity Catalog schema, generates three synthetic tables
-    (~6,700 rows), and optionally provisions a fully-configured Genie space.
+    (~6,700 rows), and provisions a fully-configured Genie space.
 
     Parameters
     ----------
@@ -716,8 +788,8 @@ def deploy(
     schema : str
         Target schema name.  Defaults to ``"demand_forecasting"``.
     warehouse_id : str, optional
-        SQL warehouse ID for the Genie space.  If omitted the tables are
-        still created but the Genie space step is skipped.
+        SQL warehouse ID for the Genie space.  If omitted, the best
+        available warehouse is auto-detected.
 
     Returns
     -------
@@ -728,9 +800,16 @@ def deploy(
     if catalog is None:
         catalog = _default_catalog(spark)
 
+    ws_url, token, username = _workspace_context(spark)
+
+    if warehouse_id is None:
+        warehouse_id = _find_best_warehouse(ws_url, token)
+        if warehouse_id is None:
+            _log("WARNING: No SQL warehouse found — Genie space will be skipped")
+
     _log(f"Catalog  : {catalog}")
     _log(f"Schema   : {catalog}.{schema}")
-    _log(f"Warehouse: {warehouse_id or '(skipping Genie space)'}")
+    _log(f"Warehouse: {warehouse_id or '(none found)'}")
     print()
 
     fqn = _create_schema(spark, catalog, schema)
@@ -740,7 +819,6 @@ def deploy(
     genie_url: Optional[str] = None
     if warehouse_id:
         try:
-            ws_url, token, username = _workspace_context(spark)
             genie_url = _create_genie_space(ws_url, token, fqn, warehouse_id, username)
         except Exception as exc:
             _log(f"  WARNING: Genie space creation failed: {exc}")
@@ -756,10 +834,21 @@ def deploy(
     _log(f"  {'TOTAL':30s}  {total:>6,} rows")
     if genie_url:
         _log(f"  Genie: {genie_url}")
-        _display_html(
-            f'<h3><a href="{genie_url}" target="_blank">'
-            f"Open Genie Space</a></h3>"
-        )
+
+    table_rows = "".join(
+        f'<tr style="border-bottom: 1px solid #dee2e6;">'
+        f'<td style="padding: 6px 0; color: #6c757d;">{t}</td>'
+        f'<td style="padding: 6px 0; font-family: monospace;">{cnt:,} rows</td>'
+        f"</tr>"
+        for t, cnt in tables.items()
+    )
+    genie_button = (_GENIE_BUTTON_HTML % {"genie_url": genie_url}) if genie_url else ""
+    _display_html(_SUMMARY_HTML % {
+        "fqn": fqn,
+        "table_rows": table_rows,
+        "total": f"{total:,}",
+        "genie_button": genie_button,
+    })
 
     return {
         "catalog": catalog,
