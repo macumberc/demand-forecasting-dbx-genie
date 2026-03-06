@@ -43,11 +43,11 @@ def _api(
     body: Optional[dict] = None,
 ) -> tuple[int, Any]:
     """Make an HTTP request and return (status_code, parsed_json | error_text)."""
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    data = json.dumps(body).encode() if body else None
+    headers = {"Authorization": f"Bearer {token}"}
+    data = None
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req) as resp:
@@ -166,12 +166,18 @@ def _find_best_warehouse(workspace_url: str, token: str) -> Optional[str]:
     Preference order: serverless RUNNING > pro RUNNING > serverless STOPPED >
     pro STOPPED > classic RUNNING > classic STOPPED.
     """
+    _log("Auto-detecting SQL warehouse ...")
     status, result = _api("GET", f"https://{workspace_url}/api/2.0/sql/warehouses", token)
-    if status != 200 or not isinstance(result, dict):
+    if status != 200:
+        _log(f"  WARNING: Warehouse list API returned {status}")
+        return None
+    if not isinstance(result, dict):
+        _log(f"  WARNING: Unexpected API response type: {type(result)}")
         return None
 
     warehouses = result.get("warehouses", [])
     if not warehouses:
+        _log("  WARNING: No SQL warehouses found in workspace")
         return None
 
     def _rank(wh: dict) -> tuple:
@@ -183,7 +189,7 @@ def _find_best_warehouse(workspace_url: str, token: str) -> Optional[str]:
 
     warehouses.sort(key=_rank, reverse=True)
     best = warehouses[0]
-    _log(f"Auto-selected warehouse: {best.get('name', best['id'])} ({best['id']})")
+    _log(f"  Selected: {best.get('name', best['id'])} ({best['id']})")
     return best["id"]
 
 
