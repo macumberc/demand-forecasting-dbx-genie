@@ -6,7 +6,7 @@ A ready-to-deploy Databricks Genie space for logistics demand forecasting and in
 
 ```python
 # Cell 1
-%pip install git+https://github.com/macumberc/demand-forecasting.git
+%pip install git+https://github.com/macumberc/demand-forecasting-dbx-genie.git
 
 # Cell 2
 from demand_forecasting_genie import deploy

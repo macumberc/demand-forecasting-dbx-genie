@@ -26,8 +26,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/macumberc/demand-forecasting"
-Repository = "https://github.com/macumberc/demand-forecasting"
+Homepage = "https://github.com/macumberc/demand-forecasting-dbx-genie"
+Repository = "https://github.com/macumberc/demand-forecasting-dbx-genie"
 
 [tool.setuptools.packages.find]
 include = ["demand_forecasting_genie*"]
