@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "demand-forecasting-genie"
-version = "0.1.2"
+version = "1.0.0"
 description = "One-command deployment of a Databricks Genie space for logistics demand forecasting & inventory management"
 readme = "README.md"
 license = "Apache-2.0"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["databricks", "genie", "demand-forecasting", "logistics", "supply-chain"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Database",
     "Programming Language :: Python :: 3",
@@ -22,14 +22,12 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-]
-dependencies = [
-    "requests",
+    "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
-Homepage = "https://github.com/chad-macumber_data/demand-forecasting"
-Repository = "https://github.com/chad-macumber_data/demand-forecasting"
+Homepage = "https://github.com/macumberc/demand-forecasting"
+Repository = "https://github.com/macumberc/demand-forecasting"
 
 [tool.setuptools.packages.find]
 include = ["demand_forecasting_genie*"]

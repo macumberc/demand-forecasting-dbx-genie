@@ -1,6 +1,12 @@
 """Demand Forecasting & Inventory Management — Genie Data Room for Databricks."""
 
-from .deploy import deploy
+from .deploy import deploy, teardown
 
-__version__ = "0.1.1"
-__all__ = ["deploy"]
+try:
+    from importlib.metadata import version as _version
+
+    __version__ = _version("demand-forecasting-genie")
+except Exception:
+    __version__ = "0.0.0-dev"
+
+__all__ = ["deploy", "teardown"]

@@ -5,22 +5,121 @@ Usage inside a Databricks notebook::
 
     from demand_forecasting_genie import deploy
     result = deploy(spark, catalog="my_catalog", warehouse_id="abc123")
+
+Teardown::
+
+    from demand_forecasting_genie import teardown
+    teardown(spark, **result)
 """
 
 from __future__ import annotations
 
 import json
 import re
-from typing import Optional
+import urllib.request
+import urllib.error
+from typing import Any, Dict, List, Optional
 
-import requests
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+_PREFIX = "[demand-forecasting-genie]"
+
+
+def _log(msg: str) -> None:
+    print(f"{_PREFIX} {msg}")
+
+
+# ---------------------------------------------------------------------------
+# HTTP helper  (replaces `requests` — zero external deps)
+# ---------------------------------------------------------------------------
+
+def _api(
+    method: str,
+    url: str,
+    token: str,
+    body: Optional[dict] = None,
+) -> tuple[int, Any]:
+    """Make an HTTP request and return (status_code, parsed_json | error_text)."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read().decode()
+        except Exception:
+            detail = str(exc)
+        return exc.code, detail
+
+
+# ---------------------------------------------------------------------------
+# Runtime helpers
+# ---------------------------------------------------------------------------
+
+def _get_dbutils(spark: Any) -> Any:
+    """Obtain dbutils from the Databricks runtime."""
+    try:
+        from pyspark.dbutils import DBUtils  # type: ignore[import-untyped]
+        return DBUtils(spark)
+    except ImportError:
+        pass
+    try:
+        import IPython  # type: ignore[import-untyped]
+        return IPython.get_ipython().user_ns.get("dbutils")
+    except Exception:
+        return None
+
+
+def _display_html(html: str) -> None:
+    """Call displayHTML if running inside a Databricks notebook."""
+    try:
+        import IPython  # type: ignore[import-untyped]
+        ip = IPython.get_ipython()
+        if ip and hasattr(ip, "user_ns") and "displayHTML" in ip.user_ns:
+            ip.user_ns["displayHTML"](html)
+    except Exception:
+        pass
+
+
+def _workspace_context(spark: Any) -> tuple[str, str, str]:
+    """Return (workspace_url, api_token, username)."""
+    workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
+    dbutils = _get_dbutils(spark)
+    if dbutils is None:
+        raise RuntimeError(
+            "Cannot obtain dbutils — are you running inside a Databricks notebook?"
+        )
+    token = (
+        dbutils.notebook.entry_point
+        .getDbutils()
+        .notebook()
+        .getContext()
+        .apiToken()
+        .get()
+    )
+    username = spark.sql("SELECT current_user()").first()[0]
+    return workspace_url, token, username
+
+
+def _default_catalog(spark: Any) -> str:
+    """Derive a catalog name from the current user's email prefix."""
+    user = spark.sql("SELECT current_user()").first()[0]
+    return re.sub(r"[^a-zA-Z0-9]", "_", user.split("@")[0]).lower()
 
 
 # ---------------------------------------------------------------------------
 # SQL templates
 # ---------------------------------------------------------------------------
 
-_SHIPMENT_ORDERS_SQL = """
+_SHIPMENT_ORDERS_SQL = """\
 CREATE OR REPLACE TABLE {fqn}.shipment_orders AS
 WITH
 products AS (
@@ -108,10 +207,9 @@ SELECT
     WHEN rand_status < 0.08 AND order_date > DATE'2025-11-15' THEN 'In Transit'
     ELSE 'Delivered'
   END AS order_status
-FROM filtered WHERE rand_select < selection_prob
-"""
+FROM filtered WHERE rand_select < selection_prob"""
 
-_INVENTORY_LEVELS_SQL = """
+_INVENTORY_LEVELS_SQL = """\
 CREATE OR REPLACE TABLE {fqn}.inventory_levels AS
 WITH
 products AS (
@@ -175,10 +273,9 @@ SELECT
   a.reorder_pt AS reorder_point, a.safety_stock AS safety_stock_qty,
   a.lead_time + CAST(FLOOR(RAND() * 3) - 1 AS INT) AS lead_time_days,
   a.unit_cost
-FROM assigned a CROSS JOIN snapshot_dates d
-"""
+FROM assigned a CROSS JOIN snapshot_dates d"""
 
-_DEMAND_FORECASTS_SQL = """
+_DEMAND_FORECASTS_SQL = """\
 CREATE OR REPLACE TABLE {fqn}.demand_forecasts AS
 WITH
 products AS (
@@ -261,14 +358,19 @@ SELECT product_sku, product_name, product_category, forecast_date,
     / NULLIF(CAST(predicted_demand * (0.88 + 0.24 * RAND()) AS INT), 0) * 100
   ), 1) AS forecast_error_pct,
   model_version, region
-FROM forecasts
-"""
+FROM forecasts"""
+
+_TABLE_SPECS: List[tuple[str, str]] = [
+    ("shipment_orders", _SHIPMENT_ORDERS_SQL),
+    ("inventory_levels", _INVENTORY_LEVELS_SQL),
+    ("demand_forecasts", _DEMAND_FORECASTS_SQL),
+]
 
 # ---------------------------------------------------------------------------
 # Column comments
 # ---------------------------------------------------------------------------
 
-_COLUMN_COMMENTS = {
+_COLUMN_COMMENTS: Dict[str, Dict[str, str]] = {
     "shipment_orders": {
         "order_id": "Unique order identifier",
         "order_date": "Date order was placed",
@@ -313,11 +415,11 @@ _COLUMN_COMMENTS = {
 
 
 # ---------------------------------------------------------------------------
-# Genie space definition
+# Genie space payload
 # ---------------------------------------------------------------------------
 
 def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
-    """Build the full Genie space API payload."""
+    """Build the Genie space API payload."""
     serialized_space = {
         "version": 2,
         "config": {
@@ -326,7 +428,7 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                 {"id": "a1b2c3d4e5f6000000000000000002bb", "question": ["What is the forecast accuracy by product category?"]},
                 {"id": "a1b2c3d4e5f6000000000000000003cc", "question": ["Show total shipment volume by warehouse for the last 3 months"]},
                 {"id": "a1b2c3d4e5f6000000000000000004dd", "question": ["Which warehouses have fill rates below 95%?"]},
-                {"id": "a1b2c3d4e5f6000000000000000005ee", "question": ["What is the average days-of-supply by product category?"]}
+                {"id": "a1b2c3d4e5f6000000000000000005ee", "question": ["What is the average days-of-supply by product category?"]},
             ]
         },
         "data_sources": {
@@ -338,18 +440,18 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                         {"column_name": "forecast_date", "enable_format_assistance": True},
                         {"column_name": "model_version", "enable_format_assistance": True, "enable_entity_matching": True},
                         {"column_name": "product_category", "enable_format_assistance": True, "enable_entity_matching": True},
-                        {"column_name": "region", "enable_format_assistance": True, "enable_entity_matching": True}
-                    ]
+                        {"column_name": "region", "enable_format_assistance": True, "enable_entity_matching": True},
+                    ],
                 },
                 {
                     "identifier": f"{fqn}.inventory_levels",
-                    "description": ["Daily inventory snapshots across 8 distribution centers. Tracks quantity on hand, reorder points, safety stock levels, and supplier lead times."],
+                    "description": ["Weekly inventory snapshots across 8 distribution centers. Tracks quantity on hand, reorder points, safety stock levels, and supplier lead times."],
                     "column_configs": [
                         {"column_name": "product_category", "enable_format_assistance": True, "enable_entity_matching": True},
                         {"column_name": "product_sku", "enable_format_assistance": True, "enable_entity_matching": True},
                         {"column_name": "warehouse_id", "enable_format_assistance": True, "enable_entity_matching": True},
-                        {"column_name": "warehouse_name", "enable_format_assistance": True, "enable_entity_matching": True}
-                    ]
+                        {"column_name": "warehouse_name", "enable_format_assistance": True, "enable_entity_matching": True},
+                    ],
                 },
                 {
                     "identifier": f"{fqn}.shipment_orders",
@@ -360,9 +462,9 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                         {"column_name": "order_status", "enable_format_assistance": True, "enable_entity_matching": True},
                         {"column_name": "product_category", "enable_format_assistance": True, "enable_entity_matching": True},
                         {"column_name": "product_sku", "enable_format_assistance": True, "enable_entity_matching": True},
-                        {"column_name": "warehouse_id", "enable_format_assistance": True, "enable_entity_matching": True}
-                    ]
-                }
+                        {"column_name": "warehouse_id", "enable_format_assistance": True, "enable_entity_matching": True},
+                    ],
+                },
             ]
         },
         "instructions": {
@@ -379,8 +481,8 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                     "When asked about 'last month' or 'this month', use calendar months relative to the max date in the data. ",
                     "Round percentages to 1 decimal place and monetary values to 2 decimal places. ",
                     "The 8 warehouses are: WH-EAST-01 (Newark DC), WH-EAST-02 (Atlanta DC), WH-CENT-01 (Chicago DC), WH-CENT-02 (Minneapolis DC), WH-SOUTH-01 (Dallas DC), WH-SOUTH-02 (Miami DC), WH-WEST-01 (Los Angeles DC), WH-WEST-02 (Denver DC). ",
-                    "Product categories are: Electronics, Food & Beverage, Home & Garden, Health & Wellness, Clothing & Apparel."
-                ]
+                    "Product categories are: Electronics, Food & Beverage, Home & Garden, Health & Wellness, Clothing & Apparel.",
+                ],
             }],
             "example_question_sqls": [
                 {
@@ -393,8 +495,8 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                         f"       WHEN quantity_on_hand <= reorder_point THEN 'LOW' END as stock_status\n",
                         f"FROM {fqn}.inventory_levels\n",
                         f"WHERE quantity_on_hand <= reorder_point\n",
-                        f"ORDER BY quantity_on_hand / NULLIF(reorder_point, 0) ASC"
-                    ]
+                        f"ORDER BY quantity_on_hand / NULLIF(reorder_point, 0) ASC",
+                    ],
                 },
                 {
                     "id": "01f099751a3a1df300000000000000b2",
@@ -405,8 +507,8 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                         f"WHERE order_date >= ADD_MONTHS((SELECT MAX(order_date) FROM {fqn}.shipment_orders), -3)\n",
                         f"  AND order_status = 'Delivered'\n",
                         f"GROUP BY warehouse_id\n",
-                        f"ORDER BY total_shipped DESC"
-                    ]
+                        f"ORDER BY total_shipped DESC",
+                    ],
                 },
                 {
                     "id": "01f099751a3a1df300000000000000b3",
@@ -418,8 +520,8 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                         f"  COUNT(*) as num_forecasts\n",
                         f"FROM {fqn}.demand_forecasts\n",
                         f"GROUP BY product_category\n",
-                        f"ORDER BY avg_accuracy_pct DESC"
-                    ]
+                        f"ORDER BY avg_accuracy_pct DESC",
+                    ],
                 },
                 {
                     "id": "01f099751a3a1df300000000000000b4",
@@ -438,8 +540,8 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                         f"FROM {fqn}.inventory_levels i\n",
                         f"JOIN daily_demand d ON i.product_sku = d.product_sku\n",
                         f"GROUP BY i.product_category\n",
-                        f"ORDER BY avg_days_of_supply ASC"
-                    ]
+                        f"ORDER BY avg_days_of_supply ASC",
+                    ],
                 },
                 {
                     "id": "01f099751a3a1df300000000000000b5",
@@ -453,29 +555,29 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                         f"FROM {fqn}.demand_forecasts\n",
                         f"WHERE product_category = 'Electronics'\n",
                         f"  AND forecast_date >= '2025-10-01'\n",
-                        f"ORDER BY forecast_date, product_name"
-                    ]
-                }
+                        f"ORDER BY forecast_date, product_name",
+                    ],
+                },
             ],
             "join_specs": [],
             "sql_snippets": {
                 "filters": [
                     {"id": "01f09972e66d100000000000000000d1", "sql": ["inventory.quantity_on_hand <= inventory.reorder_point"], "display_name": "below reorder point", "synonyms": ["low stock", "needs reorder", "stockout risk"], "instruction": ["Use when the user asks about products that need reordering or are at stockout risk"]},
                     {"id": "01f09972e66d100000000000000000d2", "sql": ["inventory.quantity_on_hand < inventory.safety_stock_qty"], "display_name": "below safety stock", "synonyms": ["critical stock", "emergency", "urgent reorder"], "instruction": ["Use when the user asks about critically low inventory"]},
-                    {"id": "01f09972e66d100000000000000000d3", "sql": ["orders.order_status = 'Delivered'"], "display_name": "delivered orders", "synonyms": ["completed orders", "fulfilled orders"], "instruction": ["Use when calculating fill rates, shipment volumes, or completed deliveries"]}
+                    {"id": "01f09972e66d100000000000000000d3", "sql": ["orders.order_status = 'Delivered'"], "display_name": "delivered orders", "synonyms": ["completed orders", "fulfilled orders"], "instruction": ["Use when calculating fill rates, shipment volumes, or completed deliveries"]},
                 ],
                 "expressions": [
                     {"id": "01f09974563a100000000000000000e1", "alias": "order_month", "sql": ["DATE_TRUNC('month', orders.order_date)"], "display_name": "month", "synonyms": ["order month", "monthly"]},
                     {"id": "01f09974563a100000000000000000e2", "alias": "order_quarter", "sql": ["DATE_TRUNC('quarter', orders.order_date)"], "display_name": "quarter", "synonyms": ["order quarter", "quarterly"]},
-                    {"id": "01f09974563a100000000000000000e3", "alias": "stock_status", "sql": ["CASE WHEN inventory.quantity_on_hand < inventory.safety_stock_qty THEN 'Critical' WHEN inventory.quantity_on_hand <= inventory.reorder_point THEN 'Low' WHEN inventory.quantity_on_hand <= inventory.reorder_point * 2 THEN 'Healthy' ELSE 'Overstocked' END"], "display_name": "stock status", "synonyms": ["inventory status", "stock level classification"]}
+                    {"id": "01f09974563a100000000000000000e3", "alias": "stock_status", "sql": ["CASE WHEN inventory.quantity_on_hand < inventory.safety_stock_qty THEN 'Critical' WHEN inventory.quantity_on_hand <= inventory.reorder_point THEN 'Low' WHEN inventory.quantity_on_hand <= inventory.reorder_point * 2 THEN 'Healthy' ELSE 'Overstocked' END"], "display_name": "stock status", "synonyms": ["inventory status", "stock level classification"]},
                 ],
                 "measures": [
                     {"id": "01f09972611f100000000000000000f1", "alias": "total_shipped", "sql": ["SUM(orders.quantity)"], "display_name": "total units shipped", "synonyms": ["total quantity", "shipment volume", "units shipped"]},
                     {"id": "01f09972611f100000000000000000f2", "alias": "total_revenue", "sql": ["SUM(orders.quantity * orders.unit_price)"], "display_name": "total revenue", "synonyms": ["revenue", "total sales", "order value"]},
                     {"id": "01f09972611f100000000000000000f3", "alias": "avg_forecast_accuracy", "sql": ["ROUND(AVG(100 - forecasts.forecast_error_pct), 1)"], "display_name": "average forecast accuracy", "synonyms": ["forecast accuracy", "prediction accuracy", "model accuracy"]},
-                    {"id": "01f09972611f100000000000000000f4", "alias": "total_inventory_value", "sql": ["SUM(inventory.quantity_on_hand * inventory.unit_cost)"], "display_name": "total inventory value", "synonyms": ["inventory value", "stock value", "warehouse value"]}
-                ]
-            }
+                    {"id": "01f09972611f100000000000000000f4", "alias": "total_inventory_value", "sql": ["SUM(inventory.quantity_on_hand * inventory.unit_cost)"], "display_name": "total inventory value", "synonyms": ["inventory value", "stock value", "warehouse value"]},
+                ],
+            },
         },
         "benchmarks": {
             "questions": [
@@ -483,9 +585,9 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
                 {"id": "01f0d0b4e81510000000000000000a02", "question": ["What is the forecast accuracy by product category?"], "answer": [{"format": "SQL", "content": [f"SELECT product_category, ROUND(AVG(100 - forecast_error_pct), 1) as accuracy_pct\n", f"FROM {fqn}.demand_forecasts\n", f"GROUP BY product_category ORDER BY accuracy_pct DESC"]}]},
                 {"id": "01f0d0b4e81510000000000000000a03", "question": ["Show total shipment volume by warehouse"], "answer": [{"format": "SQL", "content": [f"SELECT warehouse_id, SUM(quantity) as total_shipped\n", f"FROM {fqn}.shipment_orders\n", f"WHERE order_status = 'Delivered'\n", f"GROUP BY warehouse_id ORDER BY total_shipped DESC"]}]},
                 {"id": "01f0d0b4e81510000000000000000a04", "question": ["What is the total inventory value by warehouse?"], "answer": [{"format": "SQL", "content": [f"SELECT warehouse_id, warehouse_name,\n", f"  ROUND(SUM(quantity_on_hand * unit_cost), 2) as total_value\n", f"FROM {fqn}.inventory_levels\n", f"GROUP BY warehouse_id, warehouse_name ORDER BY total_value DESC"]}]},
-                {"id": "01f0d0b4e81510000000000000000a05", "question": ["Which products need reordering today based on lead time?"], "answer": [{"format": "SQL", "content": [f"SELECT product_sku, product_name, warehouse_name,\n", f"  quantity_on_hand, reorder_point, lead_time_days\n", f"FROM {fqn}.inventory_levels\n", f"WHERE quantity_on_hand <= reorder_point\n", f"ORDER BY lead_time_days DESC, quantity_on_hand ASC"]}]}
+                {"id": "01f0d0b4e81510000000000000000a05", "question": ["Which products need reordering today based on lead time?"], "answer": [{"format": "SQL", "content": [f"SELECT product_sku, product_name, warehouse_name,\n", f"  quantity_on_hand, reorder_point, lead_time_days\n", f"FROM {fqn}.inventory_levels\n", f"WHERE quantity_on_hand <= reorder_point\n", f"ORDER BY lead_time_days DESC, quantity_on_hand ASC"]}]},
             ]
-        }
+        },
     }
 
     return {
@@ -493,7 +595,7 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
         "description": (
             "Supply chain analytics for NorthStar Logistics. "
             "Ask questions about demand forecasts, inventory levels, stockout risks, "
-            "fill rates, and shipment trends across 8 distribution centers and 50 SKUs."
+            "fill rates, and shipment trends across 8 distribution centers and 20 SKUs."
         ),
         "parent_path": f"/Workspace/Users/{username}",
         "warehouse_id": warehouse_id,
@@ -502,37 +604,30 @@ def _build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Internal orchestration
 # ---------------------------------------------------------------------------
 
-def _log(msg: str) -> None:
-    print(f"[demand-forecasting-genie] {msg}")
-
-
-def _create_schema(spark, catalog: str, schema: str) -> str:
+def _create_schema(spark: Any, catalog: str, schema: str) -> str:
     fqn = f"{catalog}.{schema}"
     try:
         spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
-    except Exception as e:
-        if "PERMISSION_DENIED" in str(e) or "UNAUTHORIZED_ACCESS" in str(e):
-            _log(f"No permission to create catalog — assuming '{catalog}' already exists")
+    except Exception as exc:
+        msg = str(exc)
+        if "PERMISSION_DENIED" in msg or "UNAUTHORIZED" in msg:
+            _log(f"No permission to create catalog — assuming '{catalog}' exists")
         else:
             raise
     spark.sql(
         f"CREATE SCHEMA IF NOT EXISTS {fqn} "
-        f"COMMENT 'Logistics demand forecasting and inventory management - Genie demo data'"
+        f"COMMENT 'Logistics demand forecasting and inventory management — Genie demo data'"
     )
-    _log(f"Schema {fqn} ready")
+    _log(f"Schema ready: {fqn}")
     return fqn
 
 
-def _create_tables(spark, fqn: str) -> dict[str, int]:
-    counts = {}
-    for name, sql in [
-        ("shipment_orders", _SHIPMENT_ORDERS_SQL),
-        ("inventory_levels", _INVENTORY_LEVELS_SQL),
-        ("demand_forecasts", _DEMAND_FORECASTS_SQL),
-    ]:
+def _create_tables(spark: Any, fqn: str) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for name, sql in _TABLE_SPECS:
         _log(f"Creating {name} ...")
         spark.sql(sql.format(fqn=fqn))
         cnt = spark.table(f"{fqn}.{name}").count()
@@ -541,56 +636,59 @@ def _create_tables(spark, fqn: str) -> dict[str, int]:
     return counts
 
 
-def _add_column_comments(spark, fqn: str) -> None:
+def _add_column_comments(spark: Any, fqn: str) -> None:
     _log("Adding column comments ...")
     for table, cols in _COLUMN_COMMENTS.items():
         for col, comment in cols.items():
-            spark.sql(f"ALTER TABLE {fqn}.{table} ALTER COLUMN {col} COMMENT '{comment}'")
-    _log("  Column comments applied to all 3 tables")
+            safe_comment = comment.replace("'", "\\'")
+            spark.sql(
+                f"ALTER TABLE {fqn}.{table} ALTER COLUMN {col} COMMENT '{safe_comment}'"
+            )
+    _log("  Column comments applied to all tables")
 
 
-def _get_dbutils(spark):
-    """Get dbutils from the Databricks runtime."""
-    try:
-        from pyspark.dbutils import DBUtils
-        return DBUtils(spark)
-    except ImportError:
-        try:
-            import IPython
-            return IPython.get_ipython().user_ns.get("dbutils")
-        except Exception:
-            return None
-
-
-def _create_genie_space(spark, fqn: str, warehouse_id: str) -> Optional[str]:
-    workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
-    dbutils = _get_dbutils(spark)
-    if dbutils is None:
-        _log("WARNING: Could not obtain dbutils - skipping Genie space creation")
-        return None
-
-    token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-    username = spark.sql("SELECT current_user()").first()[0]
-
+def _create_genie_space(
+    workspace_url: str,
+    token: str,
+    fqn: str,
+    warehouse_id: str,
+    username: str,
+) -> Optional[str]:
     payload = _build_genie_payload(fqn, warehouse_id, username)
-
     _log("Creating Genie space ...")
-    resp = requests.post(
+
+    status, result = _api(
+        "POST",
         f"https://{workspace_url}/api/2.0/genie/spaces",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json=payload,
+        token,
+        payload,
     )
 
-    if resp.status_code == 200:
-        space = resp.json()
-        space_id = space["space_id"]
+    if status == 200 and isinstance(result, dict):
+        space_id = result["space_id"]
         genie_url = f"https://{workspace_url}/genie/rooms/{space_id}"
-        _log(f"  Genie space created: {space['title']}")
+        _log(f"  Genie space created: {result.get('title', space_id)}")
         _log(f"  URL: {genie_url}")
         return genie_url
-    else:
-        _log(f"  ERROR creating Genie space ({resp.status_code}): {resp.text}")
-        return None
+
+    _log(f"  ERROR creating Genie space ({status}): {result}")
+    return None
+
+
+def _delete_genie_space(workspace_url: str, token: str, space_id: str) -> bool:
+    """Delete a Genie space by ID. Returns True on success."""
+    status, _ = _api(
+        "DELETE",
+        f"https://{workspace_url}/api/2.0/genie/spaces/{space_id}",
+        token,
+    )
+    return status in (200, 204)
+
+
+def _extract_space_id(genie_url: str) -> Optional[str]:
+    """Pull the space ID from a Genie URL like .../genie/rooms/<id>."""
+    match = re.search(r"/genie/rooms/([a-zA-Z0-9_-]+)", genie_url)
+    return match.group(1) if match else None
 
 
 # ---------------------------------------------------------------------------
@@ -598,11 +696,11 @@ def _create_genie_space(spark, fqn: str, warehouse_id: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def deploy(
-    spark,
+    spark: Any,
     catalog: Optional[str] = None,
     schema: str = "demand_forecasting",
     warehouse_id: Optional[str] = None,
-) -> dict:
+) -> Dict[str, Any]:
     """Deploy the NorthStar Logistics demand-forecasting Genie data room.
 
     Creates a Unity Catalog schema, generates three synthetic tables
@@ -624,11 +722,11 @@ def deploy(
     Returns
     -------
     dict
-        ``{"catalog", "schema", "fqn", "tables", "genie_url"}``
+        Keys: ``catalog``, ``schema``, ``fqn``, ``tables``, ``genie_url``.
+        Pass this dict as ``**result`` to :func:`teardown` to remove everything.
     """
     if catalog is None:
-        user = spark.sql("SELECT current_user()").first()[0]
-        catalog = re.sub(r"[^a-zA-Z0-9]", "_", user.split("@")[0]).lower()
+        catalog = _default_catalog(spark)
 
     _log(f"Catalog  : {catalog}")
     _log(f"Schema   : {catalog}.{schema}")
@@ -639,18 +737,29 @@ def deploy(
     tables = _create_tables(spark, fqn)
     _add_column_comments(spark, fqn)
 
-    genie_url = None
+    genie_url: Optional[str] = None
     if warehouse_id:
-        genie_url = _create_genie_space(spark, fqn, warehouse_id)
+        try:
+            ws_url, token, username = _workspace_context(spark)
+            genie_url = _create_genie_space(ws_url, token, fqn, warehouse_id, username)
+        except Exception as exc:
+            _log(f"  WARNING: Genie space creation failed: {exc}")
 
     print()
     _log("=" * 50)
     _log("SETUP COMPLETE")
     _log("=" * 50)
+    total = 0
     for t, cnt in tables.items():
         _log(f"  {t:30s}  {cnt:>6,} rows")
+        total += cnt
+    _log(f"  {'TOTAL':30s}  {total:>6,} rows")
     if genie_url:
         _log(f"  Genie: {genie_url}")
+        _display_html(
+            f'<h3><a href="{genie_url}" target="_blank">'
+            f"Open Genie Space</a></h3>"
+        )
 
     return {
         "catalog": catalog,
@@ -659,3 +768,67 @@ def deploy(
         "tables": tables,
         "genie_url": genie_url,
     }
+
+
+def teardown(
+    spark: Any,
+    catalog: Optional[str] = None,
+    schema: str = "demand_forecasting",
+    genie_url: Optional[str] = None,
+    **_kwargs: Any,
+) -> Dict[str, Any]:
+    """Remove all resources created by :func:`deploy`.
+
+    Drops the schema (with CASCADE) and optionally deletes the Genie space.
+
+    The easiest way to call this is to unpack the dict returned by ``deploy``::
+
+        result = deploy(spark)
+        teardown(spark, **result)
+
+    Parameters
+    ----------
+    spark : SparkSession
+        Active Spark session.
+    catalog : str, optional
+        Catalog containing the schema.  Defaults to the current user's name.
+    schema : str
+        Schema name to drop.  Defaults to ``"demand_forecasting"``.
+    genie_url : str, optional
+        Genie space URL to delete.  If ``None``, only the schema is dropped.
+
+    Returns
+    -------
+    dict
+        ``{"schema_dropped": bool, "genie_deleted": bool}``
+    """
+    if catalog is None:
+        catalog = _default_catalog(spark)
+
+    fqn = f"{catalog}.{schema}"
+    result: Dict[str, Any] = {"schema_dropped": False, "genie_deleted": False}
+
+    _log(f"Dropping schema {fqn} CASCADE ...")
+    try:
+        spark.sql(f"DROP SCHEMA IF EXISTS {fqn} CASCADE")
+        result["schema_dropped"] = True
+        _log(f"  Schema {fqn} dropped")
+    except Exception as exc:
+        _log(f"  ERROR dropping schema: {exc}")
+
+    if genie_url:
+        space_id = _extract_space_id(genie_url)
+        if space_id:
+            _log(f"Deleting Genie space {space_id} ...")
+            try:
+                ws_url, token, _ = _workspace_context(spark)
+                if _delete_genie_space(ws_url, token, space_id):
+                    result["genie_deleted"] = True
+                    _log("  Genie space deleted")
+                else:
+                    _log("  WARNING: Genie space deletion returned non-success status")
+            except Exception as exc:
+                _log(f"  ERROR deleting Genie space: {exc}")
+
+    _log("Teardown complete")
+    return result

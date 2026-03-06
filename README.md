@@ -1,43 +1,62 @@
 # Demand Forecasting & Inventory Management — Genie Data Room
 
-A ready-to-deploy Databricks Genie space for logistics demand forecasting and inventory management. Install via pip or clone the repo — either way, one command gives you a fully configured Genie room backed by three synthetic Unity Catalog tables.
+A ready-to-deploy Databricks Genie space for logistics demand forecasting and inventory management. Two lines in a serverless notebook gives you a fully configured Genie room backed by three synthetic Unity Catalog tables.
+
+## Quick Start
+
+```python
+# Cell 1
+%pip install git+https://github.com/macumberc/demand-forecasting.git
+
+# Cell 2
+from demand_forecasting_genie import deploy
+result = deploy(spark)
+```
+
+That's it. The `deploy()` function creates the catalog, schema, three tables (~6,700 rows), and prints a summary. Pass a `warehouse_id` to also create a Genie space:
+
+```python
+result = deploy(spark, warehouse_id="your_warehouse_id")
+```
+
+## Cleanup
+
+```python
+from demand_forecasting_genie import teardown
+teardown(spark, **result)
+```
+
+This drops the schema (CASCADE) and deletes the Genie space.
 
 ## Scenario
 
 **NorthStar Logistics** is a nationwide third-party logistics (3PL) provider operating 8 regional distribution centers across the US. The supply chain team needs real-time visibility into demand patterns, inventory health, and forecast accuracy to reduce stockouts ($2.3M/year) and free up working capital tied in excess inventory ($5M+).
 
-## Quick Start — pip install (recommended)
+## API Reference
 
-In any Databricks notebook:
+### `deploy(spark, catalog=None, schema="demand_forecasting", warehouse_id=None)`
 
-```python
-# Cell 1 — install the package
-%pip install demand-forecasting-genie
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `spark` | SparkSession | *required* | Active Spark session (`spark` in notebooks) |
+| `catalog` | str | current user | Target catalog name (e.g. `jane_doe`) |
+| `schema` | str | `demand_forecasting` | Target schema name |
+| `warehouse_id` | str | `None` | SQL warehouse ID for Genie space; skips if omitted |
 
-# Cell 2 — deploy everything
-from demand_forecasting_genie import deploy
+**Returns** a dict with keys: `catalog`, `schema`, `fqn`, `tables`, `genie_url`.
 
-result = deploy(
-    spark,
-    catalog="my_catalog",           # optional — defaults to your username
-    warehouse_id="abc123def456"     # optional — skips Genie space if omitted
-)
-```
+### `teardown(spark, catalog=None, schema="demand_forecasting", genie_url=None, **kwargs)`
 
-The `deploy()` function creates the catalog, schema, three tables (~6,700 rows), and a Genie space. It returns a dict with the catalog, schema, table row counts, and Genie space URL.
+Accepts the same dict returned by `deploy()` via `**result` unpacking.
 
-## Quick Start — Git folder
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `spark` | SparkSession | *required* | Active Spark session |
+| `catalog` | str | current user | Catalog containing the schema |
+| `schema` | str | `demand_forecasting` | Schema to drop |
+| `genie_url` | str | `None` | Genie URL to delete; skips if omitted |
 
-1. **Add this repo as a Git folder** in your Databricks workspace
-   - Workspace → Repos → *Add Repo* → paste this repo URL
-2. **Open `setup_notebook`** (the notebook)
-3. **Fill in the widgets:**
-   - `catalog_name` — defaults to your username (e.g., `jane_doe`)
-   - `schema_name` — defaults to `demand_forecasting`
-   - `warehouse_id` — the ID of a SQL Pro or Serverless warehouse (find it in SQL Warehouses → your warehouse → URL or details page)
-4. **Run All**
-
-The notebook will create the catalog, schema, three tables (~6,700 rows), and a Genie space in about 2 minutes.
+**Returns** a dict with keys: `schema_dropped`, `genie_deleted`.
 
 ## What Gets Created
 
@@ -45,7 +64,7 @@ The notebook will create the catalog, schema, three tables (~6,700 rows), and a 
 
 | Table | Rows | Description |
 |---|---|---|
-| `shipment_orders` | ~1,300 | Order transactions across 20 SKUs, 8 warehouses, 12 months (Jan–Dec 2025) with seasonal demand patterns |
+| `shipment_orders` | ~1,400 | Order transactions across 20 SKUs, 8 warehouses, 12 months (Jan-Dec 2025) with seasonal demand patterns |
 | `inventory_levels` | ~4,400 | Weekly inventory snapshots — quantity on hand, reorder points, safety stock, lead times |
 | `demand_forecasts` | ~870 | Monthly ML forecasts with confidence intervals, actuals, and error tracking across 3 model versions |
 
@@ -97,8 +116,8 @@ The Genie space is deployed with:
 
 - Databricks workspace with Unity Catalog enabled
 - Permission to create catalogs (or an existing catalog you can write to)
-- A SQL Pro or Serverless SQL warehouse
-- DBR 13.3+ runtime
+- A SQL Pro or Serverless SQL warehouse (only needed for Genie space creation)
+- DBR 13.3+ or serverless notebook
 
 ## Resources
 
@@ -106,4 +125,3 @@ The Genie space is deployed with:
 - [How to Build Production-Ready Genie Spaces](https://www.databricks.com/blog/how-build-production-ready-genie-spaces-and-build-trust-along-way)
 - [Unity Catalog metric views](https://docs.databricks.com/aws/en/metric-views/)
 - [Genie Data Room Planning Template (Google Sheets)](https://docs.google.com/spreadsheets/d/1w4FIx3IqhJjfsN4-mfVNEJR49_LE30bzY0XdXgh21So/edit)
-- Databricks docs
