@@ -13,7 +13,7 @@ from demand_forecasting_genie import deploy
 result = deploy(spark)
 ```
 
-That's it. The `deploy()` function creates the catalog, schema, three tables (~6,700 rows), auto-detects the best SQL warehouse, creates a Genie space, and renders clickable buttons for the Genie room and cleanup.
+That's it. `deploy()` creates the catalog, schema, three deterministic tables (~6,700 rows), auto-detects the best SQL warehouse, creates a Genie space, and renders clickable buttons for the Genie room and cleanup.
 
 To use a specific warehouse instead of auto-detection:
 
@@ -36,29 +36,23 @@ This drops the schema (CASCADE) and deletes the Genie space.
 
 ## API Reference
 
-### `deploy(spark, catalog=None, schema="demand_forecasting", warehouse_id=None)`
+### `deploy(spark, catalog=None, schema=None, warehouse_id="auto", seed=20250306)`
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `spark` | SparkSession | *required* | Active Spark session (`spark` in notebooks) |
-| `catalog` | str | current user | Target catalog name (e.g. `jane_doe`) |
-| `schema` | str | `demand_forecasting` | Target schema name |
-| `warehouse_id` | str | auto-detected | SQL warehouse ID for Genie space; auto-selects the best available if omitted |
+| `catalog` | str | current catalog | Target catalog name |
+| `schema` | str | `demand_forecasting_<user>` | Target schema name (user-scoped by default) |
+| `warehouse_id` | str | `"auto"` | SQL warehouse ID for Genie space; `"auto"` selects the best available, `None` skips Genie creation |
+| `seed` | int | `20250306` | Deterministic seed for data generation |
 
-**Returns** a dict with keys: `catalog`, `schema`, `fqn`, `tables`, `genie_url`.
+**Returns** a dict with keys: `catalog`, `schema`, `fqn`, `seed`, `tables`, `table_fqdns`, `warehouse_id`, `genie`, `genie_url`.
 
-### `teardown(spark, catalog=None, schema="demand_forecasting", genie_url=None, **kwargs)`
+### `teardown(spark, **result)`
 
-Accepts the same dict returned by `deploy()` via `**result` unpacking.
+Accepts the dict returned by `deploy()` via `**result` unpacking.
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `spark` | SparkSession | *required* | Active Spark session |
-| `catalog` | str | current user | Catalog containing the schema |
-| `schema` | str | `demand_forecasting` | Schema to drop |
-| `genie_url` | str | `None` | Genie URL to delete; skips if omitted |
-
-**Returns** a dict with keys: `schema_dropped`, `genie_deleted`.
+**Returns** a dict with keys: `catalog`, `schema`, `fqn`, `dropped_schema`, `deleted_space_ids`, `deleted_space_count`.
 
 ## What Gets Created
 
@@ -66,9 +60,11 @@ Accepts the same dict returned by `deploy()` via `**result` unpacking.
 
 | Table | Rows | Description |
 |---|---|---|
-| `shipment_orders` | ~1,400 | Order transactions across 20 SKUs, 8 warehouses, 12 months (Jan-Dec 2025) with seasonal demand patterns |
+| `shipment_orders` | ~1,400 | Order transactions across 20 SKUs, 8 warehouses, 12 months (Jan–Dec 2025) with seasonal demand patterns |
 | `inventory_levels` | ~4,400 | Weekly inventory snapshots — quantity on hand, reorder points, safety stock, lead times |
 | `demand_forecasts` | ~870 | Monthly ML forecasts with confidence intervals, actuals, and error tracking across 3 model versions |
+
+All data is deterministic — the same seed always produces the same tables.
 
 ### Products (20 SKUs across 5 categories)
 
@@ -97,7 +93,7 @@ Accepts the same dict returned by `deploy()` via `**result` unpacking.
 
 The Genie space is deployed with:
 
-- **General instructions** — business context, metric definitions (Days of Supply, Fill Rate, Forecast Accuracy, Inventory Turnover), warehouse mapping
+- **General instructions** — business context, metric definitions (Days of Supply, Fill Rate, Forecast Accuracy), warehouse mapping
 - **5 sample questions** displayed to users on the landing page
 - **5 example SQL queries** covering stockout risk, shipment volume, forecast accuracy, days-of-supply, and actual vs. predicted demand
 - **SQL snippets** — 3 filters, 3 expressions, 4 measures
