@@ -306,19 +306,25 @@ def table_fqdns(fqn: str) -> dict[str, str]:
     }
 
 
-def build_table_sqls(fqn: str, seed: int) -> dict[str, str]:
+def build_table_sqls(fqn: str, seed: int, scale: int = 1) -> dict[str, str]:
     """Build all deterministic CTAS statements."""
 
     return {
-        SHIPMENT_TABLE: build_shipment_orders_sql(fqn, seed),
-        INVENTORY_TABLE: build_inventory_levels_sql(fqn, seed),
-        FORECAST_TABLE: build_demand_forecasts_sql(fqn, seed),
+        SHIPMENT_TABLE: build_shipment_orders_sql(fqn, seed, scale),
+        INVENTORY_TABLE: build_inventory_levels_sql(fqn, seed, scale),
+        FORECAST_TABLE: build_demand_forecasts_sql(fqn, seed, scale),
     }
 
 
-def build_shipment_orders_sql(fqn: str, seed: int) -> str:
+def _start_year(scale: int) -> int:
+    """Compute the start year based on scale (scale=1 -> 2025 only)."""
+    return 2025 - (scale - 1)
+
+
+def build_shipment_orders_sql(fqn: str, seed: int, scale: int = 1) -> str:
     """Build the deterministic shipment orders table."""
 
+    start_year = _start_year(scale)
     products_values = _values_sql(
         [[p["sku"], p["name"], p["category"], p["price"]] for p in PRODUCTS]
     )
@@ -357,7 +363,7 @@ warehouses AS (
   AS t(wh_id, wh_name, region)
 ),
 date_range AS (
-  SELECT EXPLODE(SEQUENCE(DATE'2025-01-01', DATE'2025-12-31', INTERVAL 1 DAY)) AS order_date
+  SELECT EXPLODE(SEQUENCE(DATE'{start_year}-01-01', DATE'2025-12-31', INTERVAL 1 DAY)) AS order_date
 ),
 order_skeleton AS (
   SELECT
@@ -429,7 +435,7 @@ WHERE select_noise < selection_prob
 """.strip()
 
 
-def build_inventory_levels_sql(fqn: str, seed: int) -> str:
+def build_inventory_levels_sql(fqn: str, seed: int, scale: int = 1) -> str:
     """Build the deterministic weekly inventory snapshot table."""
 
     products_values = _values_sql(
@@ -470,6 +476,8 @@ def build_inventory_levels_sql(fqn: str, seed: int) -> str:
         offset=-1,
     )
 
+    start_year = _start_year(scale)
+
     return f"""
 CREATE OR REPLACE TABLE {fqn}.{INVENTORY_TABLE} AS
 WITH
@@ -484,7 +492,7 @@ warehouses AS (
   AS t(wh_id, wh_name, lead_time)
 ),
 snapshot_dates AS (
-  SELECT EXPLODE(SEQUENCE(DATE'2025-01-01', DATE'2025-12-31', INTERVAL 7 DAY)) AS snapshot_date
+  SELECT EXPLODE(SEQUENCE(DATE'{start_year}-01-01', DATE'2025-12-31', INTERVAL 7 DAY)) AS snapshot_date
 ),
 product_warehouse AS (
   SELECT
@@ -533,9 +541,10 @@ CROSS JOIN snapshot_dates d
 """.strip()
 
 
-def build_demand_forecasts_sql(fqn: str, seed: int) -> str:
+def build_demand_forecasts_sql(fqn: str, seed: int, scale: int = 1) -> str:
     """Build the deterministic monthly forecast table."""
 
+    start_year = _start_year(scale)
     products_values = _values_sql(
         [[p["sku"], p["name"], p["category"]] for p in PRODUCTS]
     )
@@ -585,7 +594,7 @@ regions AS (
   AS t(region)
 ),
 months AS (
-  SELECT EXPLODE(SEQUENCE(DATE'2025-01-01', DATE'2025-12-01', INTERVAL 1 MONTH)) AS forecast_date
+  SELECT EXPLODE(SEQUENCE(DATE'{start_year}-01-01', DATE'2025-12-01', INTERVAL 1 MONTH)) AS forecast_date
 ),
 base AS (
   SELECT
@@ -595,8 +604,8 @@ base AS (
     r.region,
     m.forecast_date,
     CASE
-      WHEN m.forecast_date < DATE'2025-05-01' THEN 'v3.0'
-      WHEN m.forecast_date < DATE'2025-09-01' THEN 'v3.1'
+      WHEN MONTH(m.forecast_date) <= 4 THEN 'v3.0'
+      WHEN MONTH(m.forecast_date) <= 8 THEN 'v3.1'
       ELSE 'v3.2'
     END AS model_version,
     CASE

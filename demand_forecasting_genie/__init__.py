@@ -90,6 +90,7 @@ def deploy(
     schema: Optional[str] = None,
     warehouse_id: Optional[str] = "auto",
     seed: int = DEFAULT_SEED,
+    scale: int = 1,
 ) -> dict[str, Any]:
     """Deploy the NorthStar Logistics demand-forecasting Genie data room.
 
@@ -110,12 +111,18 @@ def deploy(
         Genie space creation entirely.
     seed : int
         Deterministic seed for data generation.
+    scale : int
+        Data size multiplier (default 1).  ``scale=1`` generates 1 year of
+        data (2025).  ``scale=5`` generates 5 years (2021–2025), roughly
+        5x the rows.
 
     Returns
     -------
     dict
         Pass this dict as ``**result`` to :func:`teardown` to remove everything.
     """
+    if scale < 1:
+        raise ValueError("scale must be >= 1")
     ns = resolve_namespace(spark, catalog=catalog, schema=schema)
 
     _log(f"Catalog  : {ns.catalog}")
@@ -163,7 +170,7 @@ def deploy(
             raise
     _log(f"Schema ready: {ns.fqn}")
 
-    sqls = build_table_sqls(ns.fqn, seed)
+    sqls = build_table_sqls(ns.fqn, seed, scale)
     tables: dict[str, int] = {}
     for name, sql in sqls.items():
         _log(f"Creating {name} ...")

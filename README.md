@@ -15,6 +15,12 @@ result = deploy(spark)
 
 That's it. `deploy()` creates the schema, three deterministic tables (~6,700 rows), auto-detects the best SQL warehouse, creates a Genie space, and renders clickable buttons for the Genie room and cleanup. If you don't have permission to create a catalog, it automatically falls back to the workspace's current catalog.
 
+To scale up the data size (e.g., for performance testing):
+
+```python
+result = deploy(spark, scale=5)  # 5 years of data (~33K rows)
+```
+
 To use a specific warehouse instead of auto-detection:
 
 ```python
@@ -36,7 +42,7 @@ This drops the schema (CASCADE) and deletes the Genie space.
 
 ## API Reference
 
-### `deploy(spark, catalog=None, schema=None, warehouse_id="auto", seed=20250306)`
+### `deploy(spark, catalog=None, schema=None, warehouse_id="auto", seed=20250306, scale=1)`
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -45,6 +51,7 @@ This drops the schema (CASCADE) and deletes the Genie space.
 | `schema` | str | `demand_forecasting_<user>` | Target schema name (user-scoped by default) |
 | `warehouse_id` | str | `"auto"` | SQL warehouse ID for Genie space; `"auto"` selects the best available, `None` skips Genie creation |
 | `seed` | int | `20250306` | Deterministic seed for data generation |
+| `scale` | int | `1` | Data size multiplier. `1` = 1 year (2025), `5` = 5 years (2021-2025), `10` = 10 years, etc. Rows scale linearly. |
 
 **Returns** a dict with keys: `catalog`, `schema`, `fqn`, `seed`, `tables`, `table_fqdns`, `warehouse_id`, `genie`, `genie_url`.
 
@@ -93,7 +100,8 @@ All data is deterministic — the same seed always produces the same tables.
 
 The Genie space is deployed with:
 
-- **General instructions** — business context, metric definitions (Days of Supply, Fill Rate, Forecast Accuracy), warehouse mapping
+- **General instructions** — role context, data overview, metric definitions (Days of Supply, Fill Rate, Forecast Accuracy, Stockout Risk, Critical Stock), and query guidelines
+- **3 join specifications** — defines how tables relate (shipment_orders <-> inventory_levels on product_sku + warehouse_id, shipment_orders <-> demand_forecasts on product_sku, inventory_levels <-> demand_forecasts on product_sku)
 - **5 sample questions** displayed to users on the landing page
 - **5 example SQL queries** covering stockout risk, shipment volume, forecast accuracy, days-of-supply, and actual vs. predicted demand
 - **SQL snippets** — 3 filters, 3 expressions, 4 measures
