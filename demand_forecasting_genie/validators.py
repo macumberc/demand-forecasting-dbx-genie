@@ -83,6 +83,13 @@ def current_catalog(spark) -> str:
     return validate_identifier(value, "catalog")
 
 
+def catalog_exists(spark, catalog: str) -> bool:
+    """Check whether a catalog already exists in the metastore."""
+
+    rows = spark.sql("SHOW CATALOGS").collect()
+    return any(row[0] == catalog for row in rows)
+
+
 def resolve_namespace(
     spark,
     catalog: Optional[str],

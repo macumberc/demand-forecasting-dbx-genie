@@ -9,7 +9,7 @@ from .config import DEFAULT_SCHEMA_COMMENT, DEFAULT_SEED
 from .data import TABLE_COLUMN_COMMENTS, build_table_sqls, table_fqdns
 from .genie import create_or_replace_genie_space, resolve_warehouse_id
 from .results import DeploymentResult, GenieSpaceResult
-from .validators import current_catalog, resolve_namespace, sql_string
+from .validators import catalog_exists, current_catalog, resolve_namespace, sql_string
 
 try:
     from importlib.metadata import version as _version
@@ -122,19 +122,22 @@ def deploy(
     _log(f"Schema   : {ns.fqn}")
 
     catalog_attempted = False
-    try:
-        spark.sql(f"CREATE CATALOG IF NOT EXISTS {ns.catalog}")
-        catalog_attempted = True
-    except Exception as exc:
-        msg = str(exc)
-        if any(err in msg for err in _CATALOG_FALLBACK_ERRORS):
-            fallback = current_catalog(spark)
-            _log(f"Cannot create catalog '{ns.catalog}' — falling back to '{fallback}'")
-            ns = resolve_namespace(spark, catalog=fallback, schema=ns.schema)
-            _log(f"Catalog  : {ns.catalog}")
-            _log(f"Schema   : {ns.fqn}")
-        else:
-            raise
+    if catalog_exists(spark, ns.catalog):
+        _log(f"Catalog '{ns.catalog}' already exists — skipping creation")
+    else:
+        try:
+            spark.sql(f"CREATE CATALOG IF NOT EXISTS {ns.catalog}")
+            catalog_attempted = True
+        except Exception as exc:
+            msg = str(exc)
+            if any(err in msg for err in _CATALOG_FALLBACK_ERRORS):
+                fallback = current_catalog(spark)
+                _log(f"Cannot create catalog '{ns.catalog}' — falling back to '{fallback}'")
+                ns = resolve_namespace(spark, catalog=fallback, schema=ns.schema)
+                _log(f"Catalog  : {ns.catalog}")
+                _log(f"Schema   : {ns.fqn}")
+            else:
+                raise
 
     try:
         spark.sql(
