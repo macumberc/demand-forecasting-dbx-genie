@@ -126,14 +126,34 @@ def deploy(
     except Exception as exc:
         msg = str(exc)
         if "PERMISSION_DENIED" in msg or "UNAUTHORIZED" in msg:
-            _log(f"No permission to create catalog — assuming '{ns.catalog}' exists")
+            _log(f"No permission to create catalog '{ns.catalog}' — falling back to 'main'")
+            ns = resolve_namespace(spark, catalog="main", schema=ns.schema)
+            _log(f"Catalog  : {ns.catalog}")
+            _log(f"Schema   : {ns.fqn}")
         else:
             raise
 
-    spark.sql(
-        f"CREATE SCHEMA IF NOT EXISTS {ns.fqn} "
-        f"COMMENT '{sql_string(DEFAULT_SCHEMA_COMMENT)}'"
-    )
+    try:
+        spark.sql(
+            f"CREATE SCHEMA IF NOT EXISTS {ns.fqn} "
+            f"COMMENT '{sql_string(DEFAULT_SCHEMA_COMMENT)}'"
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "PERMISSION_DENIED" in msg or "UNAUTHORIZED" in msg:
+            if ns.catalog != "main":
+                _log(f"No permission to create schema in '{ns.catalog}' — falling back to 'main'")
+                ns = resolve_namespace(spark, catalog="main", schema=ns.schema)
+                _log(f"Catalog  : {ns.catalog}")
+                _log(f"Schema   : {ns.fqn}")
+                spark.sql(
+                    f"CREATE SCHEMA IF NOT EXISTS {ns.fqn} "
+                    f"COMMENT '{sql_string(DEFAULT_SCHEMA_COMMENT)}'"
+                )
+            else:
+                raise
+        else:
+            raise
     _log(f"Schema ready: {ns.fqn}")
 
     sqls = build_table_sqls(ns.fqn, seed)
