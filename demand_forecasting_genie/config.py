@@ -11,7 +11,7 @@ DEFAULT_SCHEMA_COMMENT = (
     "NorthStar Logistics demand forecasting and inventory management demo data"
 )
 
-DEFAULT_SPACE_TITLE = "NorthStar Logistics - Demand Forecasting & Inventory"
+DEFAULT_SPACE_TITLE = "Northstar Logistics - Demand Forecasting & Inventory \U0001f69b"
 SPACE_DESCRIPTION_MARKER = "Managed by demand_forecasting_genie"
 
 AUTO_WAREHOUSE = "auto"

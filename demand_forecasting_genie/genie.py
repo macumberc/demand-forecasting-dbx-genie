@@ -23,7 +23,7 @@ from .results import GenieSpaceResult
 def build_space_title(fqn: str) -> str:
     """Render a user-facing Genie title."""
 
-    return f"{DEFAULT_SPACE_TITLE} ({fqn})"
+    return DEFAULT_SPACE_TITLE
 
 
 def build_space_description(fqn: str) -> str:
