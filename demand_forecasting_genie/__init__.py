@@ -21,6 +21,8 @@ except Exception:
 
 _PREFIX = "[demand-forecasting-genie]"
 
+_CATALOG_FALLBACK_ERRORS = ("PERMISSION_DENIED", "UNAUTHORIZED", "INVALID_STATE")
+
 
 def _log(msg: str) -> None:
     print(f"{_PREFIX} {msg}")
@@ -125,9 +127,9 @@ def deploy(
         catalog_attempted = True
     except Exception as exc:
         msg = str(exc)
-        if "PERMISSION_DENIED" in msg or "UNAUTHORIZED" in msg:
+        if any(err in msg for err in _CATALOG_FALLBACK_ERRORS):
             fallback = current_catalog(spark)
-            _log(f"No permission to create catalog '{ns.catalog}' — falling back to '{fallback}'")
+            _log(f"Cannot create catalog '{ns.catalog}' — falling back to '{fallback}'")
             ns = resolve_namespace(spark, catalog=fallback, schema=ns.schema)
             _log(f"Catalog  : {ns.catalog}")
             _log(f"Schema   : {ns.fqn}")
@@ -141,10 +143,10 @@ def deploy(
         )
     except Exception as exc:
         msg = str(exc)
-        if "PERMISSION_DENIED" in msg or "UNAUTHORIZED" in msg:
+        if any(err in msg for err in _CATALOG_FALLBACK_ERRORS):
             fallback = current_catalog(spark)
             if ns.catalog != fallback:
-                _log(f"No permission to create schema in '{ns.catalog}' — falling back to '{fallback}'")
+                _log(f"Cannot create schema in '{ns.catalog}' — falling back to '{fallback}'")
                 ns = resolve_namespace(spark, catalog=fallback, schema=ns.schema)
                 _log(f"Catalog  : {ns.catalog}")
                 _log(f"Schema   : {ns.fqn}")
