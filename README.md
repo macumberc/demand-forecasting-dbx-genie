@@ -100,8 +100,7 @@ All data is deterministic — the same seed always produces the same tables.
 
 The Genie space is deployed with:
 
-- **General instructions** — role context, data overview, metric definitions (Days of Supply, Fill Rate, Forecast Accuracy, Stockout Risk, Critical Stock), and query guidelines
-- **3 join specifications** — defines how tables relate (shipment_orders <-> inventory_levels on product_sku + warehouse_id, shipment_orders <-> demand_forecasts on product_sku, inventory_levels <-> demand_forecasts on product_sku)
+- **General instructions** — role context and query guidelines
 - **5 sample questions** displayed to users on the landing page
 - **5 example SQL queries** covering stockout risk, shipment volume, forecast accuracy, days-of-supply, and actual vs. predicted demand
 - **SQL snippets** — 3 filters, 3 expressions, 4 measures

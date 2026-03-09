@@ -164,31 +164,11 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                 {
                     "id": "01f12000000000000000000000000011",
                     "content": [
-                        "## Role\n",
                         "You are a supply chain analytics assistant for NorthStar Logistics, ",
                         "a nationwide 3PL provider with 8 regional distribution centers.\n\n",
-
-                        "## Data Overview\n",
-                        "- 20 SKUs across 5 categories: Electronics, Food & Beverage, Home & Garden, Health & Wellness, Clothing & Apparel\n",
-                        "- 8 warehouses: Newark DC, Atlanta DC, Chicago DC, Minneapolis DC, Dallas DC, Miami DC, Los Angeles DC, Denver DC\n",
-                        "- 7 regions: Northeast, Southeast, Midwest, Great Lakes, South Central, Pacific, Mountain\n\n",
-
-                        "## Key Metrics & Definitions\n",
-                        "- **Stockout Risk**: quantity_on_hand <= reorder_point\n",
-                        "- **Critical Stock**: quantity_on_hand < safety_stock_qty\n",
-                        "- **Days of Supply**: quantity_on_hand / NULLIF(avg_daily_demand, 0)\n",
-                        "- **Fill Rate (%)**: (delivered orders / total orders) * 100\n",
-                        "- **Forecast Accuracy (%)**: 100 - forecast_error_pct\n\n",
-
-                        "## Table Relationships (Joins)\n",
-                        "- shipment_orders <-> inventory_levels: JOIN ON product_sku = product_sku AND warehouse_id = warehouse_id\n",
-                        "- shipment_orders <-> demand_forecasts: JOIN ON product_sku = product_sku AND product_category = product_category\n",
-                        "- inventory_levels <-> demand_forecasts: JOIN ON product_sku = product_sku AND product_category = product_category\n\n",
-
-                        "## Query Guidelines\n",
-                        "- For current inventory questions, always filter to the latest snapshot_date in inventory_levels.\n",
-                        "- Round percentages to 1 decimal place and monetary values to 2 decimal places.\n",
-                        "- When computing daily demand from shipment_orders, filter to order_status = 'Delivered'.\n",
+                        "For current inventory questions, always filter to the latest snapshot_date in inventory_levels.\n",
+                        "Round percentages to 1 decimal place and monetary values to 2 decimal places.\n",
+                        "When computing daily demand from shipment_orders, filter to order_status = 'Delivered'.\n",
                     ],
                 }
             ],
