@@ -13,7 +13,7 @@ from demand_forecasting_genie import deploy
 result = deploy(spark)
 ```
 
-That's it. `deploy()` creates the catalog, schema, three deterministic tables (~6,700 rows), auto-detects the best SQL warehouse, creates a Genie space, and renders clickable buttons for the Genie room and cleanup.
+That's it. `deploy()` creates the schema, three deterministic tables (~6,700 rows), auto-detects the best SQL warehouse, creates a Genie space, and renders clickable buttons for the Genie room and cleanup. If you don't have permission to create a catalog, it automatically falls back to the workspace's current catalog.
 
 To use a specific warehouse instead of auto-detection:
 
@@ -113,7 +113,7 @@ The Genie space is deployed with:
 ## Prerequisites
 
 - Databricks workspace with Unity Catalog enabled
-- Permission to create catalogs (or an existing catalog you can write to)
+- Permission to create schemas in a catalog (if you can't create a catalog, the workspace's current catalog is used automatically)
 - A SQL Pro or Serverless SQL warehouse (only needed for Genie space creation)
 - DBR 13.3+ or serverless notebook
 
