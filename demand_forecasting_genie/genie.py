@@ -284,28 +284,31 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
             "join_specs": [
                 {
                     "id": "01f12000000000000000000000000071",
-                    "left_table_identifier": f"{fqn}.{SHIPMENT_TABLE}",
-                    "right_table_identifier": f"{fqn}.{INVENTORY_TABLE}",
-                    "join_columns": [
-                        {"left": "product_sku", "right": "product_sku"},
-                        {"left": "warehouse_id", "right": "warehouse_id"},
+                    "left_table": f"{fqn}.{SHIPMENT_TABLE}",
+                    "right_table": f"{fqn}.{INVENTORY_TABLE}",
+                    "join_condition": [
+                        f"{SHIPMENT_TABLE}.product_sku = {INVENTORY_TABLE}.product_sku "
+                        f"AND {SHIPMENT_TABLE}.warehouse_id = {INVENTORY_TABLE}.warehouse_id"
                     ],
+                    "relationship_type": "MANY_TO_ONE",
                 },
                 {
                     "id": "01f12000000000000000000000000072",
-                    "left_table_identifier": f"{fqn}.{SHIPMENT_TABLE}",
-                    "right_table_identifier": f"{fqn}.{FORECAST_TABLE}",
-                    "join_columns": [
-                        {"left": "product_sku", "right": "product_sku"},
+                    "left_table": f"{fqn}.{SHIPMENT_TABLE}",
+                    "right_table": f"{fqn}.{FORECAST_TABLE}",
+                    "join_condition": [
+                        f"{SHIPMENT_TABLE}.product_sku = {FORECAST_TABLE}.product_sku"
                     ],
+                    "relationship_type": "MANY_TO_ONE",
                 },
                 {
                     "id": "01f12000000000000000000000000073",
-                    "left_table_identifier": f"{fqn}.{INVENTORY_TABLE}",
-                    "right_table_identifier": f"{fqn}.{FORECAST_TABLE}",
-                    "join_columns": [
-                        {"left": "product_sku", "right": "product_sku"},
+                    "left_table": f"{fqn}.{INVENTORY_TABLE}",
+                    "right_table": f"{fqn}.{FORECAST_TABLE}",
+                    "join_condition": [
+                        f"{INVENTORY_TABLE}.product_sku = {FORECAST_TABLE}.product_sku"
                     ],
+                    "relationship_type": "MANY_TO_ONE",
                 },
             ],
             "sql_snippets": {
