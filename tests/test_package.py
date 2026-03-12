@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from demand_forecasting_genie.cleanup import cleanup
-from demand_forecasting_genie.data import build_table_sqls
+from demand_forecasting_genie.data import build_metric_view_sqls, build_table_sqls, metric_view_fqdns
 from demand_forecasting_genie.genie import (
     build_genie_payload,
     build_space_description,
@@ -132,6 +132,29 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(result["dropped_schema"])
         self.assertEqual(result["deleted_space_ids"], ["space-123"])
         self.assertIn("DROP SCHEMA IF EXISTS main.demo_schema CASCADE", spark.executed_sql)
+
+    def test_metric_view_sqls_contain_with_metrics_syntax(self):
+        sqls = build_metric_view_sqls("main.demo")
+        for name, sql in sqls.items():
+            self.assertIn("WITH METRICS", sql, f"{name} missing WITH METRICS")
+            self.assertIn("LANGUAGE YAML", sql, f"{name} missing LANGUAGE YAML")
+            self.assertIn("main.demo.", sql, f"{name} missing source reference")
+
+    def test_metric_view_fqdns(self):
+        fqdns = metric_view_fqdns("main.demo")
+        self.assertIsInstance(fqdns, dict)
+        self.assertEqual(len(fqdns), 3)
+        for name, fqdn in fqdns.items():
+            self.assertTrue(fqdn.startswith("main.demo."), f"{name} fqdn should start with main.demo.")
+            self.assertIn("metrics", fqdn)
+
+    def test_genie_payload_contains_metric_views(self):
+        payload = build_genie_payload("main.demo", "warehouse-123", "user@databricks.com")
+        serialized = payload["serialized_space"]
+        self.assertIn("main.demo.shipment_orders_metrics", serialized)
+        self.assertIn("main.demo.inventory_levels_metrics", serialized)
+        self.assertIn("main.demo.demand_forecasts_metrics", serialized)
+        self.assertIn("MEASURE(", serialized)
 
     def test_resolve_warehouse_id_prefers_running_serverless_like_warehouse(self):
         spark = _FakeSpark()

@@ -11,9 +11,12 @@ import urllib.request
 from .config import (
     AUTO_WAREHOUSE,
     DEFAULT_SPACE_TITLE,
+    FORECAST_METRICS_VIEW,
     FORECAST_TABLE,
     HTTP_TIMEOUT_SECONDS,
+    INVENTORY_METRICS_VIEW,
     INVENTORY_TABLE,
+    SHIPMENT_METRICS_VIEW,
     SHIPMENT_TABLE,
     SPACE_DESCRIPTION_MARKER,
 )
@@ -63,6 +66,14 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                 {
                     "id": "01f12000000000000000000000000005",
                     "question": ["What is the average days of supply by product category?"],
+                },
+                {
+                    "id": "01f12000000000000000000000000006",
+                    "question": ["What is our fill rate by product category?"],
+                },
+                {
+                    "id": "01f12000000000000000000000000007",
+                    "question": ["Show total revenue by destination region"],
                 },
             ]
         },
@@ -157,6 +168,27 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                         },
                     ],
                 },
+                {
+                    "identifier": f"{fqn}.{FORECAST_METRICS_VIEW}",
+                    "description": [
+                        "Metric view for demand forecasts. Use MEASURE() to query "
+                        "total predicted/actual demand, forecast accuracy, and variance."
+                    ],
+                },
+                {
+                    "identifier": f"{fqn}.{INVENTORY_METRICS_VIEW}",
+                    "description": [
+                        "Metric view for inventory levels. Use MEASURE() to query "
+                        "quantity on hand, inventory value, and stockout risk counts."
+                    ],
+                },
+                {
+                    "identifier": f"{fqn}.{SHIPMENT_METRICS_VIEW}",
+                    "description": [
+                        "Metric view for shipment orders. Use MEASURE() to query "
+                        "total revenue, fill rate, units shipped, and order counts."
+                    ],
+                },
             ]
         },
         "instructions": {
@@ -169,6 +201,9 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                         "For current inventory questions, always filter to the latest snapshot_date in inventory_levels.\n",
                         "Round percentages to 1 decimal place and monetary values to 2 decimal places.\n",
                         "When computing daily demand from shipment_orders, filter to order_status = 'Delivered'.\n",
+                        "When answering aggregation questions (totals, averages, counts, ratios), prefer the metric views ",
+                        f"({SHIPMENT_METRICS_VIEW}, {INVENTORY_METRICS_VIEW}, {FORECAST_METRICS_VIEW}) ",
+                        "with MEASURE() syntax instead of raw SQL aggregations on the base tables.\n",
                     ],
                 }
             ],
@@ -258,6 +293,28 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                         f"WHERE product_category = 'Electronics'\n",
                         f"  AND forecast_date >= DATE'2025-10-01'\n",
                         f"ORDER BY forecast_date, product_name, region"
+                    ],
+                },
+                {
+                    "id": "01f12000000000000000000000000026",
+                    "question": ["What is our fill rate by product category?"],
+                    "sql": [
+                        f"SELECT product_category,\n",
+                        f"  MEASURE(fill_rate) AS fill_rate\n",
+                        f"FROM {fqn}.{SHIPMENT_METRICS_VIEW}\n",
+                        f"GROUP BY ALL\n",
+                        f"ORDER BY fill_rate ASC"
+                    ],
+                },
+                {
+                    "id": "01f12000000000000000000000000027",
+                    "question": ["Show total revenue by destination region"],
+                    "sql": [
+                        f"SELECT destination_region,\n",
+                        f"  MEASURE(total_revenue) AS total_revenue\n",
+                        f"FROM {fqn}.{SHIPMENT_METRICS_VIEW}\n",
+                        f"GROUP BY ALL\n",
+                        f"ORDER BY total_revenue DESC"
                     ],
                 },
             ],
@@ -434,6 +491,38 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                                 f"FROM latest_inventory\n",
                                 f"WHERE quantity_on_hand <= reorder_point\n",
                                 f"ORDER BY lead_time_days DESC, quantity_on_hand ASC"
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "id": "01f12000000000000000000000000066",
+                    "question": ["What is our fill rate by product category?"],
+                    "answer": [
+                        {
+                            "format": "SQL",
+                            "content": [
+                                f"SELECT product_category,\n",
+                                f"  MEASURE(fill_rate) AS fill_rate\n",
+                                f"FROM {fqn}.{SHIPMENT_METRICS_VIEW}\n",
+                                f"GROUP BY ALL\n",
+                                f"ORDER BY fill_rate ASC"
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "id": "01f12000000000000000000000000067",
+                    "question": ["Show total revenue by destination region"],
+                    "answer": [
+                        {
+                            "format": "SQL",
+                            "content": [
+                                f"SELECT destination_region,\n",
+                                f"  MEASURE(total_revenue) AS total_revenue\n",
+                                f"FROM {fqn}.{SHIPMENT_METRICS_VIEW}\n",
+                                f"GROUP BY ALL\n",
+                                f"ORDER BY total_revenue DESC"
                             ],
                         }
                     ],

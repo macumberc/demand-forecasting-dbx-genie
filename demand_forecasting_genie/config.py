@@ -26,3 +26,13 @@ TABLE_NAMES = (
     INVENTORY_TABLE,
     SHIPMENT_TABLE,
 )
+
+SHIPMENT_METRICS_VIEW = "shipment_orders_metrics"
+INVENTORY_METRICS_VIEW = "inventory_levels_metrics"
+FORECAST_METRICS_VIEW = "demand_forecasts_metrics"
+
+METRIC_VIEW_NAMES = (
+    FORECAST_METRICS_VIEW,
+    INVENTORY_METRICS_VIEW,
+    SHIPMENT_METRICS_VIEW,
+)

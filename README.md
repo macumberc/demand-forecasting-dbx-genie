@@ -73,6 +73,24 @@ Accepts the dict returned by `deploy()` via `**result` unpacking.
 
 All data is deterministic — the same seed always produces the same tables.
 
+### Metric Views
+
+Three metric views provide governed, reusable KPI definitions with native Genie integration via `MEASURE()` syntax.
+
+| Metric View | Source Table | Measures |
+|---|---|---|
+| `shipment_orders_metrics` | `shipment_orders` | Total Units Shipped, Total Revenue, Total Orders, Delivered Orders, Fill Rate, Avg Order Size |
+| `inventory_levels_metrics` | `inventory_levels` | Total Quantity On Hand, Total Inventory Value, SKUs Below Reorder Point, SKUs Below Safety Stock, Avg Lead Time |
+| `demand_forecasts_metrics` | `demand_forecasts` | Total Predicted Demand, Total Actual Demand, Avg Forecast Error, Avg Forecast Accuracy, Demand Variance, Forecast Count |
+
+Query metric views using `MEASURE()` syntax:
+
+```sql
+SELECT product_category, MEASURE(fill_rate) AS fill_rate
+FROM catalog.schema.shipment_orders_metrics
+GROUP BY ALL
+```
+
 ### Products (20 SKUs across 5 categories)
 
 | Category | SKUs | Example |
@@ -100,11 +118,12 @@ All data is deterministic — the same seed always produces the same tables.
 
 The Genie space is deployed with:
 
-- **General instructions** — role context and query guidelines
-- **5 sample questions** displayed to users on the landing page
-- **5 example SQL queries** covering stockout risk, shipment volume, forecast accuracy, days-of-supply, and actual vs. predicted demand
+- **Data sources** — 3 base tables + 3 metric views as data sources
+- **General instructions** — role context, query guidelines, and guidance to prefer metric views with `MEASURE()` for aggregation questions
+- **7 sample questions** displayed to users on the landing page (including fill rate and revenue by region)
+- **7 example SQL queries** covering stockout risk, shipment volume, forecast accuracy, days-of-supply, actual vs. predicted demand, and `MEASURE()`-based queries
 - **SQL snippets** — 3 filters, 3 expressions, 4 measures
-- **5 benchmarks** with expected SQL for accuracy testing
+- **7 benchmarks** with expected SQL for accuracy testing (including `MEASURE()` benchmarks)
 
 ## Example Questions to Ask Genie
 
@@ -116,13 +135,15 @@ The Genie space is deployed with:
 - Compare actual vs forecasted demand for Electronics in Q4.
 - What is the total inventory value by warehouse?
 - Which products need reordering today based on lead time?
+- What is our fill rate by product category? *(uses metric view)*
+- Show total revenue by destination region *(uses metric view)*
 
 ## Prerequisites
 
 - Databricks workspace with Unity Catalog enabled
 - Permission to create schemas in a catalog (if you can't create a catalog, the workspace's current catalog is used automatically)
 - A SQL Pro or Serverless SQL warehouse (only needed for Genie space creation)
-- DBR 13.3+ or serverless notebook
+- DBR 17.2+ or serverless notebook (metric views require DBR 17.2+)
 
 ## Resources
 

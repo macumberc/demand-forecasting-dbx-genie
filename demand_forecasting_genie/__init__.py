@@ -6,7 +6,13 @@ from typing import Any, Optional
 
 from .cleanup import cleanup as _cleanup
 from .config import DEFAULT_SCHEMA_COMMENT, DEFAULT_SEED
-from .data import TABLE_COLUMN_COMMENTS, build_table_sqls, table_fqdns
+from .data import (
+    TABLE_COLUMN_COMMENTS,
+    build_metric_view_sqls,
+    build_table_sqls,
+    metric_view_fqdns,
+    table_fqdns,
+)
 from .genie import create_or_replace_genie_space, resolve_warehouse_id
 from .results import DeploymentResult, GenieSpaceResult
 from .validators import catalog_exists, current_catalog, resolve_namespace, sql_string
@@ -53,6 +59,7 @@ _SUMMARY_HTML = """\
         <td style="padding: 6px 0; font-weight: 600; font-family: monospace;">%(fqn)s</td>
       </tr>
       %(table_rows)s
+      %(metric_view_row)s
       <tr style="border-top: 2px solid #adb5bd;">
         <td style="padding: 6px 0; color: #6c757d; font-weight: 600;">Total</td>
         <td style="padding: 6px 0; font-weight: 600;">%(total)s rows</td>
@@ -188,6 +195,13 @@ def deploy(
             )
     _log("  Column comments applied")
 
+    _log("Creating metric views ...")
+    mv_sqls = build_metric_view_sqls(ns.fqn)
+    for mv_name, mv_sql in mv_sqls.items():
+        _log(f"  {mv_name}")
+        spark.sql(mv_sql)
+    _log(f"  {len(mv_sqls)} metric views created")
+
     resolved_wh, skip_reason = resolve_warehouse_id(spark, warehouse_id)
     if skip_reason:
         _log(f"Genie: {skip_reason}")
@@ -219,6 +233,7 @@ def deploy(
         catalog_attempted=catalog_attempted,
         tables=tables,
         table_fqdns=table_fqdns(ns.fqn),
+        metric_view_fqdns=metric_view_fqdns(ns.fqn),
         warehouse_id=resolved_wh,
         genie=genie,
     )
@@ -241,13 +256,19 @@ def deploy(
         f"</tr>"
         for t, cnt in tables.items()
     )
+    metric_view_row = (
+        '<tr style="border-bottom: 1px solid #dee2e6;">'
+        '<td style="padding: 6px 0; color: #6c757d;">Metric Views</td>'
+        f'<td style="padding: 6px 0; font-family: monospace;">{len(mv_sqls)} views</td>'
+        '</tr>'
+    )
     genie_button = (
         (_GENIE_BUTTON_HTML % {"genie_url": genie.url}) if genie.url else ""
     )
     _display_html(
         _SUMMARY_HTML
         % {"fqn": ns.fqn, "table_rows": table_rows, "total": f"{total:,}",
-           "genie_button": genie_button}
+           "metric_view_row": metric_view_row, "genie_button": genie_button}
     )
 
     return result.as_dict()
