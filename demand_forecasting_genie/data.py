@@ -714,7 +714,7 @@ CREATE OR REPLACE VIEW {fqn}.{SHIPMENT_METRICS_VIEW}
 WITH METRICS
 LANGUAGE YAML
 AS $$
-version: 1
+version: 1.1
 source: {fqn}.{SHIPMENT_TABLE}
 
 dimensions:
@@ -737,26 +737,23 @@ dimensions:
 
 measures:
   - name: total_units_shipped
-    expr: SUM(quantity)
-    filter: order_status = 'Delivered'
-    description: Total units shipped for delivered orders
+    expr: SUM(quantity) FILTER (WHERE order_status = 'Delivered')
+    comment: Total units shipped for delivered orders
   - name: total_revenue
-    expr: SUM(quantity * unit_price)
-    filter: order_status = 'Delivered'
-    description: Total revenue from delivered orders in USD
+    expr: SUM(quantity * unit_price) FILTER (WHERE order_status = 'Delivered')
+    comment: Total revenue from delivered orders in USD
   - name: total_orders
     expr: COUNT(DISTINCT order_id)
-    description: Total number of orders regardless of status
+    comment: Total number of orders regardless of status
   - name: delivered_orders
-    expr: COUNT(DISTINCT order_id)
-    filter: order_status = 'Delivered'
-    description: Number of delivered orders
+    expr: COUNT(DISTINCT order_id) FILTER (WHERE order_status = 'Delivered')
+    comment: Number of delivered orders
   - name: fill_rate
     expr: COUNT(DISTINCT CASE WHEN order_status = 'Delivered' THEN order_id END) * 100.0 / NULLIF(COUNT(DISTINCT order_id), 0)
-    description: Percentage of orders that were delivered
+    comment: Percentage of orders that were delivered
   - name: avg_order_size
     expr: SUM(CASE WHEN order_status = 'Delivered' THEN quantity ELSE 0 END) * 1.0 / NULLIF(COUNT(DISTINCT CASE WHEN order_status = 'Delivered' THEN order_id END), 0)
-    description: Average units per delivered order
+    comment: Average units per delivered order
 $$
 """.strip()
 
@@ -769,7 +766,7 @@ CREATE OR REPLACE VIEW {fqn}.{INVENTORY_METRICS_VIEW}
 WITH METRICS
 LANGUAGE YAML
 AS $$
-version: 1
+version: 1.1
 source: {fqn}.{INVENTORY_TABLE}
 
 dimensions:
@@ -789,21 +786,19 @@ dimensions:
 measures:
   - name: total_quantity_on_hand
     expr: SUM(quantity_on_hand)
-    description: Total units currently in stock
+    comment: Total units currently in stock
   - name: total_inventory_value
     expr: SUM(quantity_on_hand * unit_cost)
-    description: Total inventory value in USD
+    comment: Total inventory value in USD
   - name: skus_below_reorder_point
-    expr: COUNT(1)
-    filter: quantity_on_hand <= reorder_point
-    description: Number of SKU-warehouse combinations below reorder point
+    expr: COUNT(1) FILTER (WHERE quantity_on_hand <= reorder_point)
+    comment: Number of SKU-warehouse combinations below reorder point
   - name: skus_below_safety_stock
-    expr: COUNT(1)
-    filter: quantity_on_hand < safety_stock_qty
-    description: Number of SKU-warehouse combinations below safety stock
+    expr: COUNT(1) FILTER (WHERE quantity_on_hand < safety_stock_qty)
+    comment: Number of SKU-warehouse combinations below safety stock
   - name: avg_lead_time
     expr: AVG(lead_time_days)
-    description: Average supplier lead time in days
+    comment: Average supplier lead time in days
 $$
 """.strip()
 
@@ -816,7 +811,7 @@ CREATE OR REPLACE VIEW {fqn}.{FORECAST_METRICS_VIEW}
 WITH METRICS
 LANGUAGE YAML
 AS $$
-version: 1
+version: 1.1
 source: {fqn}.{FORECAST_TABLE}
 
 dimensions:
@@ -836,22 +831,22 @@ dimensions:
 measures:
   - name: total_predicted_demand
     expr: SUM(predicted_demand)
-    description: Total predicted demand in units
+    comment: Total predicted demand in units
   - name: total_actual_demand
     expr: SUM(actual_demand)
-    description: Total actual observed demand in units
+    comment: Total actual observed demand in units
   - name: avg_forecast_error
     expr: AVG(forecast_error_pct)
-    description: Average absolute forecast error percentage
+    comment: Average absolute forecast error percentage
   - name: avg_forecast_accuracy
     expr: AVG(100 - forecast_error_pct)
-    description: Average forecast accuracy percentage
+    comment: Average forecast accuracy percentage
   - name: demand_variance
     expr: SUM(actual_demand - predicted_demand)
-    description: Total variance between actual and predicted demand
+    comment: Total variance between actual and predicted demand
   - name: forecast_count
     expr: COUNT(1)
-    description: Total number of forecast records
+    comment: Total number of forecast records
 $$
 """.strip()
 
