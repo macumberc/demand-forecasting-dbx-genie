@@ -138,6 +138,7 @@ class PackageTests(unittest.TestCase):
         for name, sql in sqls.items():
             self.assertIn("WITH METRICS", sql, f"{name} missing WITH METRICS")
             self.assertIn("LANGUAGE YAML", sql, f"{name} missing LANGUAGE YAML")
+            self.assertIn("version: 1", sql, f"{name} missing version: 1")
             self.assertIn("main.demo.", sql, f"{name} missing source reference")
 
     def test_metric_view_fqdns(self):
