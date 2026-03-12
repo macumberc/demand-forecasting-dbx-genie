@@ -105,6 +105,13 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                     ],
                 },
                 {
+                    "identifier": f"{fqn}.{FORECAST_METRICS_VIEW}",
+                    "description": [
+                        "Metric view for demand forecasts. Use MEASURE() to query "
+                        "total predicted/actual demand, forecast accuracy, and variance."
+                    ],
+                },
+                {
                     "identifier": f"{fqn}.{INVENTORY_TABLE}",
                     "description": [
                         "Weekly inventory snapshots across 8 distribution centers. Tracks "
@@ -131,6 +138,13 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                             "enable_format_assistance": True,
                             "enable_entity_matching": True,
                         },
+                    ],
+                },
+                {
+                    "identifier": f"{fqn}.{INVENTORY_METRICS_VIEW}",
+                    "description": [
+                        "Metric view for inventory levels. Use MEASURE() to query "
+                        "quantity on hand, inventory value, and stockout risk counts."
                     ],
                 },
                 {
@@ -166,20 +180,6 @@ def build_genie_payload(fqn: str, warehouse_id: str, username: str) -> dict[str,
                             "enable_format_assistance": True,
                             "enable_entity_matching": True,
                         },
-                    ],
-                },
-                {
-                    "identifier": f"{fqn}.{FORECAST_METRICS_VIEW}",
-                    "description": [
-                        "Metric view for demand forecasts. Use MEASURE() to query "
-                        "total predicted/actual demand, forecast accuracy, and variance."
-                    ],
-                },
-                {
-                    "identifier": f"{fqn}.{INVENTORY_METRICS_VIEW}",
-                    "description": [
-                        "Metric view for inventory levels. Use MEASURE() to query "
-                        "quantity on hand, inventory value, and stockout risk counts."
                     ],
                 },
                 {
