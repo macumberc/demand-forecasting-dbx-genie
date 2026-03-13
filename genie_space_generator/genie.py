@@ -56,6 +56,7 @@ def build_genie_payload(
             "description": [table.description],
         }
         if column_configs:
+            column_configs.sort(key=lambda c: c["column_name"])
             entry["column_configs"] = column_configs
         data_sources.append(entry)
 
