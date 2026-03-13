@@ -175,7 +175,7 @@ import mlflow.deployments
 
 client = mlflow.deployments.get_deploy_client("databricks")
 response = client.predict(
-    endpoint="databricks-claude-sonnet-4-20250514",  # or latest available
+    endpoint="databricks-claude-sonnet-4-6",  # or latest available
     inputs={
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -445,7 +445,7 @@ resources:
       permission: CAN_USE
   - name: serving-endpoint
     serving_endpoint:
-      endpoint_name: databricks-claude-sonnet-4-20250514
+      endpoint_name: databricks-claude-sonnet-4-6
       permission: CAN_QUERY
 ```
 
