@@ -110,13 +110,13 @@ def _build_table_sql(table: Any, fqn: str, seed: int, scale: int) -> str:
                 if months:
                     month_list = ", ".join(str(m) for m in months)
                     case_lines.append(
-                        f"      WHEN e.{category_key} = '{_sql_escape(cat)}' "
+                        f"      WHEN {category_key} = '{_sql_escape(cat)}' "
                         f"AND mo IN ({month_list}) THEN {prob}"
                     )
         # Default probability for this category
         default_prob = category_dist.get(cat, 0.03)
         case_lines.append(
-            f"      WHEN e.{category_key} = '{_sql_escape(cat)}' THEN {default_prob}"
+            f"      WHEN {category_key} = '{_sql_escape(cat)}' THEN {default_prob}"
         )
 
     if not case_lines:
@@ -140,21 +140,23 @@ def _build_table_sql(table: Any, fqn: str, seed: int, scale: int) -> str:
         interval = "INTERVAL 1 DAY"
 
     # Build column SELECT expressions
+    # In the final SELECT, reference the pre-computed column names from skeleton,
+    # not the raw hash expressions (which contain d./e. aliases that don't exist here).
     select_cols = []
     for col in table.columns:
         expr = col.generation_expr
         if expr:
-            # Replace placeholder tokens
+            # Replace placeholder tokens with column names from skeleton CTE
             expr = expr.replace("{fqn}", fqn)
             expr = expr.replace("{table}", table.table_name)
-            expr = expr.replace("{qty_noise}", qty_noise)
-            expr = expr.replace("{status_noise}", status_noise)
-            expr = expr.replace("{select_noise}", select_noise)
-            expr = expr.replace("{id_seq}", id_seq)
+            expr = expr.replace("{qty_noise}", "qty_noise")
+            expr = expr.replace("{status_noise}", "status_noise")
+            expr = expr.replace("{select_noise}", "select_noise")
+            expr = expr.replace("{id_seq}", "id_seq")
             expr = expr.replace("{seed}", str(seed))
             select_cols.append(f"  {expr} AS {col.name}")
         else:
-            select_cols.append(f"  e.{col.name}")
+            select_cols.append(f"  {col.name}")
 
     select_clause = ",\n".join(select_cols)
 
