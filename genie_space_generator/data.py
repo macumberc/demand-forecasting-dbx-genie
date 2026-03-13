@@ -154,6 +154,8 @@ def _build_table_sql(table: Any, fqn: str, seed: int, scale: int) -> str:
             expr = expr.replace("{select_noise}", "select_noise")
             expr = expr.replace("{id_seq}", "id_seq")
             expr = expr.replace("{seed}", str(seed))
+            # Strip d./e. table aliases — columns are flat in filtered CTE
+            expr = _strip_cte_aliases(expr)
             select_cols.append(f"  {expr} AS {col.name}")
         else:
             select_cols.append(f"  {col.name}")
@@ -242,6 +244,19 @@ $$""".strip()
 # ---------------------------------------------------------------------------
 # SQL helpers (replicated from reference)
 # ---------------------------------------------------------------------------
+
+
+def _strip_cte_aliases(expr: str) -> str:
+    """Remove d. and e. table alias prefixes from a SQL expression.
+
+    In the skeleton CTE, columns come from ``date_range d`` and ``entities e``.
+    By the time the final SELECT runs over ``filtered``, all columns are flat
+    so references like ``d.dt`` or ``e.patient_id`` must become ``dt`` / ``patient_id``.
+    """
+    import re
+
+    # Match word-boundary 'd.' or 'e.' followed by a column name
+    return re.sub(r'\b([de])\.(\w+)', r'\2', expr)
 
 
 def _values_sql(rows: list[list[object]]) -> str:
