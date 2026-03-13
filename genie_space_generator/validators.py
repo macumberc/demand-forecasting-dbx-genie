@@ -6,8 +6,6 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from .config import DEFAULT_SCHEMA_BASENAME
-
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -58,11 +56,11 @@ def validate_identifier(value: str, field_name: str) -> str:
     return value
 
 
-def default_schema_name(username: str) -> str:
-    """Generate a user-scoped schema name."""
+def default_schema_name(username: str, schema_basename: str) -> str:
+    """Generate a user-scoped schema name from a dynamic basename."""
 
     return validate_identifier(
-        f"{DEFAULT_SCHEMA_BASENAME}_{normalize_user_slug(username)}",
+        f"{schema_basename}_{normalize_user_slug(username)}",
         "default schema",
     )
 
@@ -94,6 +92,7 @@ def resolve_namespace(
     spark,
     catalog: Optional[str],
     schema: Optional[str],
+    schema_basename: str = "genie_demo",
 ) -> Namespace:
     """Resolve user, catalog, and schema defaults."""
 
@@ -105,7 +104,7 @@ def resolve_namespace(
         "catalog",
     )
     resolved_schema = validate_identifier(
-        schema if schema else default_schema_name(username),
+        schema if schema else default_schema_name(username, schema_basename),
         "schema",
     )
 

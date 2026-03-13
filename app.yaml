@@ -1,0 +1,14 @@
+command:
+  - python
+  - app.py
+env:
+  - name: GRADIO_SERVER_PORT
+    value: "8080"
+resources:
+  - name: sql-warehouse
+    sql_warehouse:
+      permission: CAN_USE
+  - name: serving-endpoint
+    serving_endpoint:
+      endpoint_name: databricks-claude-sonnet-4-20250514
+      permission: CAN_QUERY

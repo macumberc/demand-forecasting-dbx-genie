@@ -38,7 +38,9 @@ class DeploymentResult:
     table_fqdns: dict[str, str]
     metric_view_fqdns: dict[str, str] = field(default_factory=dict)
     warehouse_id: Optional[str] = None
-    genie: GenieSpaceResult = field(default_factory=lambda: GenieSpaceResult(status="skipped", requested=False))
+    genie: GenieSpaceResult = field(
+        default_factory=lambda: GenieSpaceResult(status="skipped", requested=False)
+    )
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
