@@ -13,6 +13,6 @@ SPACE_DESCRIPTION_MARKER = "Managed by genie_space_generator"
 
 # LLM endpoint for domain generation
 DEFAULT_LLM_ENDPOINT = "databricks-claude-sonnet-4-6"
-LLM_MAX_TOKENS = 8000
+LLM_MAX_TOKENS = 16000
 LLM_TEMPERATURE = 0.3
 LLM_MAX_RETRIES = 2

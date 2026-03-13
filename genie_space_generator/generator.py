@@ -239,6 +239,11 @@ Here is a partial example of the expected output for a logistics/supply chain us
 }}
 ```
 
+IMPORTANT: Keep the output compact to avoid truncation:
+- SQL lines in example_sqls and benchmarks: use 1-3 lines per query, not one line per SQL clause
+- dimension_values: include all {num_products} items but keep field names short
+- Keep comments brief (under 60 chars)
+
 Now generate the COMPLETE domain specification for the business context above. \
 Return ONLY the JSON object — no markdown fences, no commentary."""
 
@@ -278,6 +283,7 @@ def generate_domain_spec(
     last_error = None
     for attempt in range(1 + LLM_MAX_RETRIES):
         try:
+            print(f"[genie-space-generator]   LLM attempt {attempt + 1}/{1 + LLM_MAX_RETRIES} ...")
             response = client.predict(
                 endpoint=endpoint,
                 inputs={
@@ -291,6 +297,10 @@ def generate_domain_spec(
             )
 
             content = response["choices"][0]["message"]["content"]
+            finish_reason = (
+                response.get("choices", [{}])[0].get("finish_reason", "unknown")
+            )
+
             # Strip markdown fences if present
             content = content.strip()
             if content.startswith("```"):
@@ -299,6 +309,19 @@ def generate_domain_spec(
                 content = content.rsplit("```", 1)[0]
             content = content.strip()
 
+            if finish_reason == "length":
+                print(
+                    f"[genie-space-generator]   WARNING: Response truncated "
+                    f"(finish_reason=length, {len(content)} chars). Retrying..."
+                )
+                last_error = ValueError(
+                    f"LLM response truncated at {len(content)} chars "
+                    f"(finish_reason=length). Increase LLM_MAX_TOKENS."
+                )
+                if attempt < LLM_MAX_RETRIES:
+                    continue
+                raise last_error
+
             raw = json.loads(content)
             spec = _parse_domain_spec(raw)
             _validate_domain_spec(spec, num_tables, num_products, num_locations)
@@ -306,6 +329,7 @@ def generate_domain_spec(
 
         except Exception as exc:
             last_error = exc
+            print(f"[genie-space-generator]   Attempt {attempt + 1} failed: {exc}")
             if attempt < LLM_MAX_RETRIES:
                 continue
 
