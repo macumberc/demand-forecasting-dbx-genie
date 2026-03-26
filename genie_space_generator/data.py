@@ -81,7 +81,7 @@ def _build_table_sql(table: Any, fqn: str, seed: int, scale: int) -> str:
     entity_keys = list(entities[0].keys())
     entity_rows = [[e[k] for k in entity_keys] for e in entities]
     entity_values = _values_sql(entity_rows)
-    entity_aliases = ", ".join(entity_keys)
+    entity_aliases = ", ".join(f"`{k}`" for k in entity_keys)
 
     # Determine the category key (first key that contains 'category' or 'type',
     # or fall back to the second key)
@@ -102,6 +102,9 @@ def _build_table_sql(table: Any, fqn: str, seed: int, scale: int) -> str:
     seasonal = table.seasonal_patterns or {}
     category_dist = table.category_distribution or {}
 
+    # Backtick-quote the category key for safe use in SQL
+    cat_col = f"`{category_key}`"
+
     case_lines = []
     for cat, month_probs in seasonal.items():
         if isinstance(month_probs, dict):
@@ -110,26 +113,27 @@ def _build_table_sql(table: Any, fqn: str, seed: int, scale: int) -> str:
                 if months:
                     month_list = ", ".join(str(m) for m in months)
                     case_lines.append(
-                        f"      WHEN {category_key} = '{_sql_escape(cat)}' "
+                        f"      WHEN {cat_col} = '{_sql_escape(cat)}' "
                         f"AND mo IN ({month_list}) THEN {prob}"
                     )
         # Default probability for this category
         default_prob = category_dist.get(cat, 0.03)
         case_lines.append(
-            f"      WHEN {category_key} = '{_sql_escape(cat)}' THEN {default_prob}"
+            f"      WHEN {cat_col} = '{_sql_escape(cat)}' THEN {default_prob}"
         )
 
     if not case_lines:
-        case_lines.append("      ELSE 0.0300")
+        # No seasonal/category data; use a flat probability for all rows
+        case_expr = "    0.0300"
+    else:
+        case_expr = "    CASE\n" + "\n".join(case_lines) + "\n      ELSE 0.0300\n    END"
 
-    case_expr = "    CASE\n" + "\n".join(case_lines) + "\n      ELSE 0.0300\n    END"
-
-    # Hash-based noise columns
-    noise_parts = f"d.dt, e.{entity_pk}"
-    qty_noise = _hash_fraction(seed, "qty_noise", "d.dt", f"e.{entity_pk}")
-    status_noise = _hash_fraction(seed, "status_noise", "d.dt", f"e.{entity_pk}")
-    select_noise = _hash_fraction(seed, "select_noise", "d.dt", f"e.{entity_pk}")
-    id_seq = _hash_int(seed, "id_seq", "d.dt", f"e.{entity_pk}", modulo=500)
+    # Hash-based noise columns (backtick-quote entity PK for safety)
+    pk_ref = f"e.`{entity_pk}`"
+    qty_noise = _hash_fraction(seed, "qty_noise", "d.dt", pk_ref)
+    status_noise = _hash_fraction(seed, "status_noise", "d.dt", pk_ref)
+    select_noise = _hash_fraction(seed, "select_noise", "d.dt", pk_ref)
+    id_seq = _hash_int(seed, "id_seq", "d.dt", pk_ref, modulo=500)
 
     # Determine date interval based on archetype
     if archetype == "snapshot":
@@ -170,7 +174,7 @@ def _build_table_sql(table: Any, fqn: str, seed: int, scale: int) -> str:
     # Pair hash filter for snapshot/forecast tables
     pair_filter = ""
     if archetype in ("snapshot", "forecast"):
-        pair_hash = _hash_int(seed, "pair_hash", f"e.{entity_pk}", modulo=100)
+        pair_hash = _hash_int(seed, "pair_hash", pk_ref, modulo=100)
         pair_filter = f"  WHERE {pair_hash} < 52\n"
 
     sql = f"""CREATE OR REPLACE TABLE {fqn}.{table.table_name} AS
