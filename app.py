@@ -1,8 +1,13 @@
 """Gradio frontend for the Genie Space Generator — deployed as a Databricks App."""
 
+import logging
+
 import gradio as gr
 
 from genie_space_generator import deploy, teardown
+
+# Configure logging so deploy() output appears in the app console
+logging.basicConfig(level=logging.INFO, format="[genie-space-generator] %(message)s")
 
 
 def _get_spark():

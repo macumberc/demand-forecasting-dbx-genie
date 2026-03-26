@@ -1,34 +1,19 @@
 # Genie Space Generator
 
-Generate a fully-configured Databricks Genie space for **any industry and use case**. Enter an industry, company name, and business context — get synthetic data, metric views, and a curated Genie space in one click.
+[![CI](https://github.com/macumberc/genie-space-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/macumberc/genie-space-generator/actions/workflows/ci.yml)
 
-Deployed as a **Databricks App** with a Gradio UI, or usable as a standalone Python library in notebooks.
+Generate a fully-configured Databricks Genie space for **any industry and use case**. Enter an industry, company name, and business context — get synthetic data, metric views, and a curated Genie space in under 5 minutes.
 
-## Databricks App (UI)
-
-Once deployed, salespeople open the app URL and fill in four fields:
-
-1. **Industry** — e.g., Healthcare, Retail, Manufacturing
-2. **Company Name** — e.g., MedFlow Analytics
-3. **Use Case** — e.g., Patient readmission prediction and hospital capacity planning
-4. **Business Context** — 2-3 sentences describing the scenario
-
-Click **Generate Genie Space** and the app creates everything automatically.
-
-### Deploy the App
-
-```bash
-databricks apps create genie-space-generator --source-code-path . --config-file app.yaml
-databricks apps deploy genie-space-generator
-```
-
-## Notebook Usage (standalone)
+## Quick Start
 
 ```python
-# Cell 1
-%pip install git+https://github.com/macumberc/demand-forecasting-dbx-genie.git@automated-creation
+# Cell 1 — Install
+%pip install git+https://github.com/macumberc/genie-space-generator.git -q
+dbutils.library.restartPython()
+```
 
-# Cell 2
+```python
+# Cell 2 — Deploy
 from genie_space_generator import deploy
 
 result = deploy(
@@ -36,9 +21,13 @@ result = deploy(
     industry="Healthcare",
     company_name="MedFlow Analytics",
     use_case="Patient readmission prediction and hospital capacity planning",
-    business_context="Regional hospital network with 12 facilities tracking patient outcomes, bed utilization, and readmission rates to reduce 30-day readmissions (currently 18%) and optimize staffing.",
+    business_context="Regional hospital network with 12 facilities tracking patient outcomes, "
+                     "bed utilization, and readmission rates to reduce 30-day readmissions "
+                     "(currently 18%) and optimize staffing.",
 )
 ```
+
+Click **Open Genie Space** in the output to start exploring.
 
 ### Cleanup
 
@@ -46,6 +35,31 @@ result = deploy(
 from genie_space_generator import teardown
 teardown(spark, **result)
 ```
+
+## What It Creates
+
+For each deployment, the generator produces:
+
+- **N tables** (default 3) — transaction, snapshot, and forecast archetypes adapted to the domain
+- **N metric views** — one per table with 4-6 governed measures using `MEASURE()` syntax
+- **Genie space** with:
+  - All tables + metric views as data sources
+  - Domain-specific instructions
+  - 7 sample questions on the landing page
+  - 7 example SQL queries (including `MEASURE()` queries)
+  - SQL snippets (3 filters, 3 expressions, 4 measures)
+  - 7 benchmarks with expected SQL
+
+## Databricks App (optional UI)
+
+For teams that want a persistent web UI, deploy as a Databricks App with Gradio:
+
+```bash
+databricks apps create genie-space-generator --source-code-path . --config-file app.yaml
+databricks apps deploy genie-space-generator
+```
+
+Users open the app URL, fill in four fields (Industry, Company Name, Use Case, Business Context), and click **Generate Genie Space**.
 
 ## How It Works
 
@@ -80,24 +94,10 @@ teardown(spark, **result)
 
 Accepts the dict returned by `deploy()`. Drops the schema (CASCADE) and deletes the Genie space.
 
-## What Gets Created
-
-For each deployment, the generator produces:
-
-- **N tables** (default 3) — transaction, snapshot, and forecast archetypes adapted to the domain
-- **N metric views** — one per table with 4-6 governed measures using `MEASURE()` syntax
-- **Genie space** with:
-  - All tables + metric views as data sources
-  - Domain-specific instructions
-  - 7 sample questions on the landing page
-  - 7 example SQL queries (including `MEASURE()` queries)
-  - SQL snippets (3 filters, 3 expressions, 4 measures)
-  - 7 benchmarks with expected SQL
-
 ## Prerequisites
 
 - Databricks workspace with Unity Catalog enabled
 - Permission to create schemas in a catalog
 - A SQL Pro or Serverless SQL warehouse
 - DBR 17.2+ or serverless notebook (metric views require DBR 17.2+)
-- Access to Foundation Model API endpoint (`databricks-claude-sonnet-4-20250514`)
+- Access to Foundation Model API endpoint (`databricks-claude-sonnet-4-6`)

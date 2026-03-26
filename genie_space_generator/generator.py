@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import DEFAULT_LLM_ENDPOINT, LLM_MAX_RETRIES, LLM_MAX_TOKENS, LLM_TEMPERATURE
+from .config import DEFAULT_LLM_ENDPOINT, LLM_MAX_RETRIES, LLM_MAX_TOKENS, LLM_MAX_TOKENS_CAP, LLM_TEMPERATURE
+from .validators import sanitize_sql_identifier
+
+_logger = logging.getLogger("genie_space_generator")
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +158,12 @@ category_distribution is a dict mapping category names to their default (non-sea
 selection probability. Example:
 {{"Electronics": 0.025, "Food": 0.035}}
 
+## Metric View Measures
+- Each measure expr must be a SINGLE aggregate expression (e.g., SUM(col), COUNT(DISTINCT col))
+- NEVER nest aggregate functions: SUM(SUM(x)) or AVG(COUNT(x)) are INVALID
+- For ratio measures like "avg cost per encounter", use SUM(cost) / NULLIF(COUNT(DISTINCT id), 0) — NOT SUM(SUM(cost)) / COUNT(id)
+- FILTER (WHERE ...) clauses on aggregates are allowed and encouraged
+
 ## SQL in example_sqls and benchmarks
 - Use {{fqn}} as a placeholder for the fully-qualified schema name (e.g., catalog.schema)
 - SQL should be broken into lines as a list of strings
@@ -280,10 +291,11 @@ def generate_domain_spec(
         num_locations=num_locations,
     )
 
+    current_max_tokens = LLM_MAX_TOKENS
     last_error = None
     for attempt in range(1 + LLM_MAX_RETRIES):
         try:
-            print(f"[genie-space-generator]   LLM attempt {attempt + 1}/{1 + LLM_MAX_RETRIES} ...")
+            _logger.info("LLM attempt %d/%d ...", attempt + 1, 1 + LLM_MAX_RETRIES)
             response = client.predict(
                 endpoint=endpoint,
                 inputs={
@@ -291,7 +303,7 @@ def generate_domain_spec(
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "max_tokens": LLM_MAX_TOKENS,
+                    "max_tokens": current_max_tokens,
                     "temperature": LLM_TEMPERATURE,
                 },
             )
@@ -303,22 +315,21 @@ def generate_domain_spec(
 
             # Strip markdown fences if present
             content = content.strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1]
-            if content.endswith("```"):
-                content = content.rsplit("```", 1)[0]
-            content = content.strip()
+            fence_match = re.match(r'^```(?:\w+)?\s*\n(.*?)```\s*$', content, re.DOTALL)
+            if fence_match:
+                content = fence_match.group(1).strip()
 
             if finish_reason == "length":
-                print(
-                    f"[genie-space-generator]   WARNING: Response truncated "
-                    f"(finish_reason=length, {len(content)} chars). Retrying..."
+                _logger.warning(
+                    "Response truncated (finish_reason=length, %d chars). Retrying...",
+                    len(content),
                 )
                 last_error = ValueError(
                     f"LLM response truncated at {len(content)} chars "
                     f"(finish_reason=length). Increase LLM_MAX_TOKENS."
                 )
                 if attempt < LLM_MAX_RETRIES:
+                    current_max_tokens = min(int(current_max_tokens * 1.5), LLM_MAX_TOKENS_CAP)
                     continue
                 raise last_error
 
@@ -329,7 +340,7 @@ def generate_domain_spec(
 
         except Exception as exc:
             last_error = exc
-            print(f"[genie-space-generator]   Attempt {attempt + 1} failed: {exc}")
+            _logger.info("Attempt %d failed: %s", attempt + 1, exc)
             if attempt < LLM_MAX_RETRIES:
                 continue
 
@@ -393,13 +404,28 @@ def _parse_table_spec(raw: dict) -> TableSpec:
         )
         for c in raw["columns"]
     ]
+    table_name = sanitize_sql_identifier(raw["table_name"], "table_name")
+    # Validate column names
+    for col in columns:
+        col.name = sanitize_sql_identifier(col.name, f"column in {table_name}")
+
+    # Validate dimension value keys
+    dim_values = raw.get("dimension_values", [])
+    if dim_values:
+        for dv in dim_values:
+            sanitized = {}
+            for k, v in dv.items():
+                sanitized[sanitize_sql_identifier(k, f"dimension key in {table_name}")] = v
+            dv.clear()
+            dv.update(sanitized)
+
     return TableSpec(
-        table_name=raw["table_name"],
+        table_name=table_name,
         description=raw["description"],
         columns=columns,
         seasonal_patterns=raw.get("seasonal_patterns", {}),
         entity_dimension=raw.get("entity_dimension", "transaction"),
-        dimension_values=raw.get("dimension_values", []),
+        dimension_values=dim_values,
         category_distribution=raw.get("category_distribution", {}),
     )
 
@@ -407,8 +433,9 @@ def _parse_table_spec(raw: dict) -> TableSpec:
 def _parse_metric_view_spec(raw: dict) -> MetricViewSpec:
     """Parse a raw metric view dict into a MetricViewSpec."""
 
+    view_name = sanitize_sql_identifier(raw["view_name"], "view_name")
     return MetricViewSpec(
-        view_name=raw["view_name"],
+        view_name=view_name,
         source_table=raw["source_table"],
         dimensions=raw["dimensions"],
         measures=raw["measures"],
@@ -487,6 +514,24 @@ def _validate_domain_spec(
         raise ValueError(
             f"At least 2 benchmarks must use MEASURE(), found {measure_benchmarks}"
         )
+
+    # Verify metric view measures don't contain nested aggregates
+    _AGG_FUNCS = ("SUM(", "COUNT(", "AVG(", "MIN(", "MAX(", "STDDEV(", "VARIANCE(")
+    for mv in spec.metric_views:
+        for m in mv.measures:
+            expr = m.get("expr", "").upper()
+            # Count how many aggregate function calls appear
+            agg_count = sum(expr.count(func) for func in _AGG_FUNCS)
+            if agg_count > 1:
+                # Check if it's truly nested (one agg inside another) vs ratio (agg / agg)
+                # A simple heuristic: if we see patterns like SUM(SUM or AVG(COUNT, it's nested
+                for outer in _AGG_FUNCS:
+                    for inner in _AGG_FUNCS:
+                        if f"{outer.rstrip('(')}{inner}" in expr.replace(" ", ""):
+                            raise ValueError(
+                                f"Metric view '{mv.view_name}' measure '{m.get('name')}' "
+                                f"contains nested aggregate: {m.get('expr')}"
+                            )
 
     for table in spec.tables:
         if not table.columns:

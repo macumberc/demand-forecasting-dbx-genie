@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Optional
+
+_logger = logging.getLogger("genie_space_generator")
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -56,6 +59,23 @@ def validate_identifier(value: str, field_name: str) -> str:
     return value
 
 
+def sanitize_sql_identifier(name: str, context: str) -> str:
+    """Sanitize and validate a SQL identifier, raising on invalid names."""
+
+    original = name
+    name = name.strip()
+    name = name.replace("-", "_").replace(" ", "_")
+    if not _IDENTIFIER_RE.match(name):
+        raise ValueError(
+            f"Invalid SQL identifier for {context}: {original!r} "
+            f"(sanitized to {name!r}). Use letters, numbers, and underscores only, "
+            "starting with a letter or underscore."
+        )
+    if name != original:
+        _logger.warning("Sanitized %s identifier %r -> %r", context, original, name)
+    return name
+
+
 def default_schema_name(username: str, schema_basename: str) -> str:
     """Generate a user-scoped schema name from a dynamic basename."""
 
@@ -77,6 +97,7 @@ def current_catalog(spark) -> str:
     try:
         value = spark.sql("SELECT current_catalog()").first()[0]
     except Exception:
+        _logger.warning("Could not determine current catalog, falling back to 'main'")
         value = "main"
     return validate_identifier(value, "catalog")
 

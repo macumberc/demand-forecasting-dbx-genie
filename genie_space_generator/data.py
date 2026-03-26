@@ -252,11 +252,18 @@ def _strip_cte_aliases(expr: str) -> str:
     In the skeleton CTE, columns come from ``date_range d`` and ``entities e``.
     By the time the final SELECT runs over ``filtered``, all columns are flat
     so references like ``d.dt`` or ``e.patient_id`` must become ``dt`` / ``patient_id``.
+
+    This version is quote-aware: it only strips aliases outside of single-quoted
+    SQL string literals, so patterns like ``'d.value'`` are preserved.
     """
     import re
 
-    # Match word-boundary 'd.' or 'e.' followed by a column name
-    return re.sub(r'\b([de])\.(\w+)', r'\2', expr)
+    # Split on single-quoted segments (including escaped quotes '')
+    parts = re.split(r"('(?:''|[^'])*')", expr)
+    for i, part in enumerate(parts):
+        if i % 2 == 0:  # Not inside quotes
+            parts[i] = re.sub(r'\b([de])\.(\w+)', r'\2', part)
+    return "".join(parts)
 
 
 def _values_sql(rows: list[list[object]]) -> str:

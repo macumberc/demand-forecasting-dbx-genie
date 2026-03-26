@@ -267,7 +267,7 @@ def delete_genie_space(spark, space_id: str) -> None:
 
 
 def _warehouse_sort_key(warehouse: dict[str, Any]) -> tuple[Any, ...]:
-    """Prefer running, serverless-ish, and smaller warehouses."""
+    """Prefer running, serverless, Pro, and smaller warehouses."""
 
     size_rank = {
         "2X-Small": 0,
@@ -279,9 +279,13 @@ def _warehouse_sort_key(warehouse: dict[str, Any]) -> tuple[Any, ...]:
         "2X-Large": 6,
     }
     name = (warehouse.get("name") or "").lower()
+    is_serverless = warehouse.get("enable_serverless_compute", False)
+    wh_type = (warehouse.get("warehouse_type") or "").upper()
     return (
         warehouse.get("state") != "RUNNING",
-        "serverless" not in name,
+        not is_serverless,
+        wh_type != "PRO",
+        "serverless" not in name,  # fallback heuristic for older API responses
         "starter" not in name,
         "shared" not in name,
         size_rank.get(warehouse.get("cluster_size"), 99),
@@ -361,7 +365,7 @@ def _api_token(spark) -> str:
                 .apiToken()
                 .get()
             )
-        except Exception:
+        except (AttributeError, TypeError):
             pass
 
     token = os.environ.get("DATABRICKS_TOKEN")
@@ -380,10 +384,10 @@ def _get_dbutils(spark):
         from pyspark.dbutils import DBUtils
 
         return DBUtils(spark)
-    except Exception:
+    except (ImportError, Exception):
         try:
             import IPython
 
             return IPython.get_ipython().user_ns.get("dbutils")
-        except Exception:
+        except (ImportError, AttributeError):
             return None

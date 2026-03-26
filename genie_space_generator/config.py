@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 PACKAGE_NAME = "genie-space-generator"
-PACKAGE_VERSION = "1.0.0"
 
 DEFAULT_SEED = 20250306
 AUTO_WAREHOUSE = "auto"
@@ -16,3 +15,4 @@ DEFAULT_LLM_ENDPOINT = "databricks-claude-sonnet-4-6"
 LLM_MAX_TOKENS = 16000
 LLM_TEMPERATURE = 0.3
 LLM_MAX_RETRIES = 2
+LLM_MAX_TOKENS_CAP = 32000

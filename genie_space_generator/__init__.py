@@ -18,6 +18,11 @@ from .generator import DomainSpec, generate_domain_spec
 from .results import DeploymentResult, GenieSpaceResult
 from .validators import catalog_exists, current_catalog, resolve_namespace, sql_string
 
+import logging
+
+_logger = logging.getLogger("genie_space_generator")
+_logger.addHandler(logging.NullHandler())
+
 try:
     from importlib.metadata import version as _version
 
@@ -26,13 +31,11 @@ except Exception:
     __version__ = "0.0.0-dev"
 
 
-_PREFIX = "[genie-space-generator]"
-
 _CATALOG_FALLBACK_ERRORS = ("PERMISSION_DENIED", "UNAUTHORIZED", "INVALID_STATE")
 
 
 def _log(msg: str) -> None:
-    print(f"{_PREFIX} {msg}")
+    _logger.info(msg)
 
 
 def _display_html(html: str) -> None:
@@ -42,7 +45,7 @@ def _display_html(html: str) -> None:
         ip = IPython.get_ipython()
         if ip and hasattr(ip, "user_ns") and "displayHTML" in ip.user_ns:
             ip.user_ns["displayHTML"](html)
-    except Exception:
+    except (ImportError, AttributeError):
         pass
 
 
@@ -147,6 +150,13 @@ def deploy(
     """
     if scale < 1:
         raise ValueError("scale must be >= 1")
+
+    # Ensure log output is visible when running interactively
+    if not _logger.handlers or all(isinstance(h, logging.NullHandler) for h in _logger.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("[genie-space-generator] %(message)s"))
+        _logger.addHandler(handler)
+        _logger.setLevel(logging.INFO)
 
     # 1. Generate domain spec via LLM
     _log(f"Generating domain model for {industry} / {company_name} ...")
@@ -276,7 +286,7 @@ def deploy(
             )
             _log(f"Genie space {genie.status}: {genie.url}")
         except Exception as exc:
-            _log(f"WARNING: Genie space creation failed: {exc}")
+            _logger.warning("Genie space creation failed: %s", exc)
             genie = GenieSpaceResult(
                 status="failed", requested=True, reason=str(exc)
             )
