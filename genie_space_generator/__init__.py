@@ -49,6 +49,20 @@ def _display_html(html: str) -> None:
         pass
 
 
+def _explain_or_raise(spark: Any, sql: str, context: str) -> None:
+    """Run EXPLAIN to validate SQL before execution.
+
+    Catches column resolution errors early with a descriptive message.
+    """
+    try:
+        spark.sql(f"EXPLAIN {sql}")
+    except Exception as exc:
+        raise RuntimeError(
+            f"SQL validation failed for {context}: {exc}\n"
+            f"Generated SQL (first 500 chars): {sql[:500]}"
+        ) from exc
+
+
 _SUMMARY_HTML = """\
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             max-width: 680px; margin: 16px 0;">
@@ -246,6 +260,7 @@ def deploy(
     sqls = build_table_sqls_from_spec(domain_spec, ns.fqn, seed, scale)
     tables: dict[str, int] = {}
     for name, sql in sqls.items():
+        _explain_or_raise(spark, sql, f"table '{name}'")
         _log(f"Creating {name} ...")
         spark.sql(sql)
         cnt = spark.table(f"{ns.fqn}.{name}").count()

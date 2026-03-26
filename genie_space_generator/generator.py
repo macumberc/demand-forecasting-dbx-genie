@@ -137,7 +137,7 @@ model_version field (v3.0, v3.1, v3.2).
 ## Column Generation Expressions
 Each column needs a `generation_expr` — a SQL expression that produces the column \
 value from the skeleton CTE. Available variables in expressions:
-- `e.<any_entity_field>` — entity dimension columns
+- `e.<any_entity_field>` — entity dimension columns (use the exact key names from dimension_values)
 - `d.dt` — the date column from the date range
 - `{{qty_noise}}` — deterministic random decimal [0,1) for quantities
 - `{{status_noise}}` — deterministic random decimal [0,1) for status assignment
@@ -148,6 +148,18 @@ value from the skeleton CTE. Available variables in expressions:
 
 For columns that come directly from the entity dimension, set generation_expr to \
 empty string "" and the system will use `e.<column_name>`.
+
+### CRITICAL CONSTRAINTS for generation_expr:
+1. generation_expr runs PER ROW — NEVER use aggregate functions \
+(SUM, COUNT, AVG, MIN, MAX, STDDEV, VARIANCE). These will cause SQL errors.
+2. You may ONLY reference columns that exist in the skeleton CTE: \
+entity dimension fields (by their exact key names from dimension_values), \
+dt, mo, qty_noise, status_noise, select_noise, id_seq.
+3. NEVER reference columns from other tables in the domain.
+4. For columns that come from entities, ALWAYS use empty string "" — \
+do NOT write the entity field name as the expression.
+5. The d. and e. prefixes are allowed and will be automatically stripped. \
+Use bare column names or e./d. prefixed names.
 
 ## Seasonal Patterns Format
 seasonal_patterns is a dict where keys are category names and values are dicts \
@@ -336,6 +348,7 @@ def generate_domain_spec(
             raw = json.loads(content)
             spec = _parse_domain_spec(raw)
             _validate_domain_spec(spec, num_tables, num_products, num_locations)
+            _validate_generation_expressions(spec)
             return spec
 
         except Exception as exc:
@@ -533,8 +546,92 @@ def _validate_domain_spec(
                                 f"contains nested aggregate: {m.get('expr')}"
                             )
 
+    # Validate metric view dimension/measure references against source table columns
+    table_columns_map = {
+        t.table_name: {c.name for c in t.columns} for t in spec.tables
+    }
+    for mv in spec.metric_views:
+        src_cols = table_columns_map.get(mv.source_table, set())
+        if not src_cols:
+            raise ValueError(
+                f"Metric view '{mv.view_name}' references source table "
+                f"'{mv.source_table}' which does not exist"
+            )
+        for dim in mv.dimensions:
+            dim_expr = dim.get("expr", "")
+            # If it's a bare column name, check it exists
+            if dim_expr and re.match(r'^[a-z_][a-z0-9_]*$', dim_expr):
+                if dim_expr not in src_cols:
+                    raise ValueError(
+                        f"Metric view '{mv.view_name}' dimension '{dim['name']}' "
+                        f"references column '{dim_expr}' not in table '{mv.source_table}'. "
+                        f"Available: {sorted(src_cols)}"
+                    )
+        for m in mv.measures:
+            expr_upper = m.get("expr", "").upper()
+            if any(kw in expr_upper for kw in ("SELECT ", "FROM ", " JOIN ")):
+                raise ValueError(
+                    f"Metric view '{mv.view_name}' measure '{m.get('name')}' "
+                    f"contains a subquery. Measures must be single aggregate expressions."
+                )
+
     for table in spec.tables:
         if not table.columns:
             raise ValueError(f"Table {table.table_name} has no columns")
         if not table.dimension_values:
             raise ValueError(f"Table {table.table_name} has no dimension_values")
+
+
+def _validate_generation_expressions(spec: DomainSpec) -> None:
+    """Validate that generation_expr values only reference available columns.
+
+    Raises ValueError if any expression references invalid columns or uses
+    forbidden aggregate functions, which triggers an LLM retry.
+    """
+    _FORBIDDEN_AGGS = ("SUM(", "COUNT(", "AVG(", "MIN(", "MAX(", "STDDEV(", "VARIANCE(")
+    # Columns always available in the skeleton/filtered CTE
+    _SKELETON_COLS = {"dt", "mo", "qty_noise", "status_noise", "select_noise", "id_seq"}
+
+    errors: list[str] = []
+
+    for table in spec.tables:
+        entity_fields: set[str] = set()
+        if table.dimension_values:
+            entity_fields = set(table.dimension_values[0].keys())
+
+        valid_cols = _SKELETON_COLS | entity_fields
+
+        for col in table.columns:
+            expr = col.generation_expr
+            if not expr:
+                # Empty expr means use entity field directly
+                if col.name not in entity_fields:
+                    errors.append(
+                        f"Table '{table.table_name}', column '{col.name}': "
+                        f"empty generation_expr but '{col.name}' is not an entity field. "
+                        f"Entity fields: {sorted(entity_fields)}"
+                    )
+                continue
+
+            # Simulate the placeholder substitution done in data.py
+            test_expr = expr.upper()
+            test_expr = test_expr.replace("{QTY_NOISE}", "QTY_NOISE")
+            test_expr = test_expr.replace("{STATUS_NOISE}", "STATUS_NOISE")
+            test_expr = test_expr.replace("{SELECT_NOISE}", "SELECT_NOISE")
+            test_expr = test_expr.replace("{ID_SEQ}", "ID_SEQ")
+
+            # Check for forbidden aggregate functions
+            for agg in _FORBIDDEN_AGGS:
+                if agg in test_expr:
+                    errors.append(
+                        f"Table '{table.table_name}', column '{col.name}': "
+                        f"generation_expr uses forbidden aggregate '{agg.rstrip('(')}'. "
+                        f"Expressions run per-row and cannot use aggregates. "
+                        f"Expression: {expr}"
+                    )
+
+    if errors:
+        raise ValueError(
+            "Invalid generation expressions (will retry with LLM):\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
